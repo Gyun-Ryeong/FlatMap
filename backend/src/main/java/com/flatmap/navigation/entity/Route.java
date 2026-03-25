@@ -1,15 +1,11 @@
 package com.flatmap.navigation.entity;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "routes")
-@Getter
-@NoArgsConstructor
 public class Route {
 
     @Id
@@ -44,4 +40,18 @@ public class Route {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    public Route() {}
+
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public BigDecimal getOriginLat() { return originLat; }
+    public BigDecimal getOriginLng() { return originLng; }
+    public BigDecimal getDestLat() { return destLat; }
+    public BigDecimal getDestLng() { return destLng; }
+    public Integer getTotalLengthM() { return totalLengthM; }
+    public BigDecimal getMaxGrade() { return maxGrade; }
+    public BigDecimal getAvgGrade() { return avgGrade; }
+    public Integer getSafetyScore() { return safetyScore; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
 }

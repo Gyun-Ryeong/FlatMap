@@ -27,12 +27,15 @@ yarn-error.log*
 *.iml
 
 # Backend
+backend/src/main/resources/application.properties
 /backend/target/
 /backend/.gradle/
 /backend/build/
 *.class
 *.jar
 *.war
+/backend/logs/
+logs/
 
 # OS
 Thumbs.db

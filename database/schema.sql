@@ -51,7 +51,23 @@ CREATE TABLE route_segments (
     PRIMARY KEY (route_id, segment_id)
 );
 
+-- 급경사지/오르막 데이터 (외부 API 수집)
+CREATE TABLE steep_slope_areas (
+    id          BIGSERIAL PRIMARY KEY,
+    name        VARCHAR(255),
+    latitude    DOUBLE PRECISION,
+    longitude   DOUBLE PRECISION,
+    grade       DOUBLE PRECISION,              -- 경사도 (%)
+    risk_level  VARCHAR(20),                   -- VERY_HIGH, HIGH, MEDIUM, LOW
+    source      VARCHAR(50),                   -- GYEONGGI, DISASTER
+    region_code VARCHAR(20),                   -- 행정코드
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
 -- 인덱스
 CREATE INDEX idx_road_segments_region ON road_segments(region);
 CREATE INDEX idx_road_segments_grade ON road_segments(grade);
 CREATE INDEX idx_accident_records_segment ON accident_records(segment_id);
+CREATE INDEX idx_steep_slope_areas_source ON steep_slope_areas(source);
+CREATE INDEX idx_steep_slope_areas_region ON steep_slope_areas(region_code);
+CREATE INDEX idx_steep_slope_areas_coords ON steep_slope_areas(latitude, longitude);

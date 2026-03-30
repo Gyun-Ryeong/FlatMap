@@ -4,6 +4,17 @@ import './MapPage.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api';
 
+// 위험구간 색상 상수
+const RISK_COLORS = {
+  SAFE: '#03C75A',
+  LOW: '#FF9800',
+  MEDIUM: '#FF5722',
+  HIGH: '#F44336',
+  VERY_HIGH: '#F44336',
+};
+
+const RISK_STROKE_WEIGHT = { SAFE: 5, LOW: 7, MEDIUM: 7, HIGH: 8, VERY_HIGH: 8 };
+
 const TABS = [
   { id: 'route', label: '경로찾기', icon: '🗺️' },
   { id: 'uphill', label: '오르막길', icon: '⛰️' },
@@ -15,8 +26,9 @@ const DEFAULT_CENTER = { lat: 37.4201, lng: 127.1265 }; // 성남시청
 function MapPage() {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const polylineRef = useRef(null);
+  const polylinesRef = useRef([]);
   const markersRef = useRef([]);
+  const overlaysRef = useRef([]);
   const myLocationOverlayRef = useRef(null);
   const myLocationRef = useRef(null);
   const [activeTab, setActiveTab] = useState('route');
@@ -130,26 +142,169 @@ function MapPage() {
     );
   }, [showMyLocationMarker]);
 
-  const drawRoute = useCallback((coords) => {
+  const clearRoute = useCallback(() => {
+    polylinesRef.current.forEach((p) => p.setMap(null));
+    polylinesRef.current = [];
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+    overlaysRef.current.forEach((o) => o.setMap(null));
+    overlaysRef.current = [];
+  }, []);
+
+  const drawRoute = useCallback((coords, riskSections = []) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
     const kakao = window.kakao;
 
-    // 기존 경로/마커 제거
-    if (polylineRef.current) polylineRef.current.setMap(null);
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
+    clearRoute();
 
     const path = coords.map((c) => new kakao.maps.LatLng(c.lat, c.lng));
+    if (path.length === 0) return;
 
-    // 경로 폴리라인
-    polylineRef.current = new kakao.maps.Polyline({
-      map: mapInstanceRef.current,
-      path,
-      strokeWeight: 5,
-      strokeColor: '#03C75A',
-      strokeOpacity: 0.8,
-      strokeStyle: 'solid',
-    });
+    // 위험구간이 없으면 기존처럼 초록색 한 줄
+    if (!riskSections || riskSections.length === 0) {
+      const line = new kakao.maps.Polyline({
+        map: mapInstanceRef.current,
+        path,
+        strokeWeight: 5,
+        strokeColor: RISK_COLORS.SAFE,
+        strokeOpacity: 0.8,
+        strokeStyle: 'solid',
+      });
+      polylinesRef.current.push(line);
+    } else {
+      // 위험구간 인덱스 범위 계산 (nearestRouteIdx 기준 앞뒤 SPREAD 좌표)
+      const SPREAD = 8;
+      const riskRanges = riskSections
+        .map((rs) => ({
+          start: Math.max(0, rs.nearestRouteIdx - SPREAD),
+          end: Math.min(coords.length - 1, rs.nearestRouteIdx + SPREAD),
+          riskLevel: rs.riskLevel,
+        }))
+        .sort((a, b) => a.start - b.start);
+
+      // 겹치는 구간 병합
+      const merged = [];
+      for (const r of riskRanges) {
+        if (merged.length > 0 && r.start <= merged[merged.length - 1].end + 1) {
+          const last = merged[merged.length - 1];
+          last.end = Math.max(last.end, r.end);
+          // 더 높은 위험도 유지
+          const priority = ['LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'];
+          if (priority.indexOf(r.riskLevel) > priority.indexOf(last.riskLevel)) {
+            last.riskLevel = r.riskLevel;
+          }
+        } else {
+          merged.push({ ...r });
+        }
+      }
+
+      // 구간별 폴리라인 그리기
+      let cursor = 0;
+      for (const range of merged) {
+        // 안전 구간 (cursor ~ range.start)
+        if (cursor < range.start) {
+          const safePath = path.slice(cursor, range.start + 1);
+          if (safePath.length >= 2) {
+            const safeLine = new kakao.maps.Polyline({
+              map: mapInstanceRef.current,
+              path: safePath,
+              strokeWeight: 5,
+              strokeColor: RISK_COLORS.SAFE,
+              strokeOpacity: 0.8,
+              strokeStyle: 'solid',
+            });
+            polylinesRef.current.push(safeLine);
+          }
+        }
+        // 위험 구간
+        const riskPath = path.slice(range.start, range.end + 1);
+        if (riskPath.length >= 2) {
+          const riskLine = new kakao.maps.Polyline({
+            map: mapInstanceRef.current,
+            path: riskPath,
+            strokeWeight: RISK_STROKE_WEIGHT[range.riskLevel] || 7,
+            strokeColor: RISK_COLORS[range.riskLevel] || RISK_COLORS.MEDIUM,
+            strokeOpacity: 0.9,
+            strokeStyle: 'solid',
+          });
+          polylinesRef.current.push(riskLine);
+        }
+        cursor = range.end;
+      }
+      // 마지막 안전 구간
+      if (cursor < path.length - 1) {
+        const safePath = path.slice(cursor, path.length);
+        if (safePath.length >= 2) {
+          const safeLine = new kakao.maps.Polyline({
+            map: mapInstanceRef.current,
+            path: safePath,
+            strokeWeight: 5,
+            strokeColor: RISK_COLORS.SAFE,
+            strokeOpacity: 0.8,
+            strokeStyle: 'solid',
+          });
+          polylinesRef.current.push(safeLine);
+        }
+      }
+
+      // 위험구간 경고 오버레이
+      riskSections.forEach((rs) => {
+        const pos = new kakao.maps.LatLng(rs.lat, rs.lng);
+        const levelLabel = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? '위험'
+          : rs.riskLevel === 'MEDIUM' ? '주의' : '양호';
+        const levelClass = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? 'high'
+          : rs.riskLevel === 'MEDIUM' ? 'medium' : 'low';
+
+        const content = document.createElement('div');
+        content.className = 'risk-overlay-marker';
+        content.innerHTML = `<div class="risk-overlay-icon ${levelClass}">!</div>`;
+
+        const overlay = new kakao.maps.CustomOverlay({
+          position: pos,
+          content,
+          map: mapInstanceRef.current,
+          yAnchor: 1.3,
+          zIndex: 200,
+        });
+        overlaysRef.current.push(overlay);
+
+        // 클릭 시 InfoWindow
+        content.addEventListener('click', () => {
+          // 기존 열린 InfoWindow 닫기
+          overlaysRef.current
+            .filter((o) => o._infoOverlay)
+            .forEach((o) => { o._infoOverlay.setMap(null); delete o._infoOverlay; });
+
+          const infoContent = document.createElement('div');
+          infoContent.className = 'risk-info-window';
+          infoContent.innerHTML = `
+            <div class="risk-info-header">
+              <span class="risk-info-name">${rs.name || '위험구간'}</span>
+              <button class="risk-info-close">&times;</button>
+            </div>
+            <div class="risk-info-body">
+              <div class="risk-info-row"><span>경사도</span><strong>${rs.grade ? rs.grade.toFixed(1) + '%' : '정보없음'}</strong></div>
+              <div class="risk-info-row"><span>위험등급</span><span class="risk-badge ${levelClass}">${levelLabel}</span></div>
+              <div class="risk-info-row"><span>경로 이격</span><strong>${rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(1) + 'm' : '-'}</strong></div>
+            </div>`;
+
+          const infoOverlay = new kakao.maps.CustomOverlay({
+            position: pos,
+            content: infoContent,
+            map: mapInstanceRef.current,
+            yAnchor: 1.8,
+            zIndex: 300,
+          });
+          overlay._infoOverlay = infoOverlay;
+          overlaysRef.current.push(infoOverlay);
+
+          infoContent.querySelector('.risk-info-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            infoOverlay.setMap(null);
+          });
+        });
+      });
+    }
 
     // 출발/도착 마커
     if (path.length >= 2) {
@@ -171,7 +326,30 @@ function MapPage() {
     path.forEach((p) => bounds.extend(p));
     mapInstanceRef.current.setBounds(bounds);
 
-    console.log('경로 표시 완료:', coords.length, '개 좌표');
+    console.log('경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
+  }, [clearRoute]);
+
+  const moveToLocation = useCallback((lat, lng, name) => {
+    if (!mapInstanceRef.current || !window.kakao?.maps) return;
+    const kakao = window.kakao;
+    const pos = new kakao.maps.LatLng(lat, lng);
+    mapInstanceRef.current.setCenter(pos);
+    mapInstanceRef.current.setLevel(3);
+
+    // 기존 UphillPanel 마커 제거 (태그로 구분)
+    markersRef.current = markersRef.current.filter((m) => {
+      if (m._uphillMarker) { m.setMap(null); return false; }
+      return true;
+    });
+
+    const marker = new kakao.maps.Marker({ map: mapInstanceRef.current, position: pos, title: name || '' });
+    marker._uphillMarker = true;
+    markersRef.current.push(marker);
+
+    if (name) {
+      const infoWindow = new kakao.maps.InfoWindow({ content: `<div style="padding:5px;font-size:12px;">${name}</div>` });
+      infoWindow.open(mapInstanceRef.current, marker);
+    }
   }, []);
 
   const handleTabClick = (tabId) => {
@@ -242,7 +420,7 @@ function MapPage() {
         {/* 탭 콘텐츠 */}
         <div className="tab-content">
           {activeTab === 'route' && <RoutePanel kakaoReady={kakaoReady} onRouteFound={drawRoute} defaultOrigin={defaultOrigin} />}
-          {activeTab === 'uphill' && <UphillPanel />}
+          {activeTab === 'uphill' && <UphillPanel onItemClick={moveToLocation} />}
           {activeTab === 'safety' && <SafetyPanel />}
         </div>
       </div>
@@ -404,10 +582,12 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
       setRouteInfo({
         distance: data.totalDistance,
         duration: data.totalDuration,
+        riskSections: data.riskSections || [],
+        overallRisk: data.overallRisk || 'SAFE',
       });
 
       if (data.coords && data.coords.length > 0) {
-        onRouteFound(data.coords);
+        onRouteFound(data.coords, data.riskSections || []);
       }
     } catch (err) {
       console.error('경로 검색 에러:', err);
@@ -449,9 +629,44 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
       </button>
 
       {routeInfo && (
-        <div className="route-result-info">
-          <span>거리: {(routeInfo.distance / 1000).toFixed(1)}km</span>
-          <span>예상 시간: {Math.round(routeInfo.duration / 60)}분</span>
+        <div className="route-result-section">
+          <div className="route-result-info">
+            <span>거리: {(routeInfo.distance / 1000).toFixed(1)}km</span>
+            <span>예상 시간: {Math.round(routeInfo.duration / 60)}분</span>
+          </div>
+
+          {/* 위험구간 요약 */}
+          <div className="risk-summary">
+            <div className="risk-summary-header">
+              <span className={`overall-risk-badge ${routeInfo.overallRisk === 'DANGER' ? 'danger' : routeInfo.overallRisk === 'CAUTION' ? 'caution' : 'safe'}`}>
+                {routeInfo.overallRisk === 'DANGER' ? '위험' : routeInfo.overallRisk === 'CAUTION' ? '주의' : '안전'}
+              </span>
+              {routeInfo.riskSections.length > 0
+                ? <span className="risk-summary-text">위험구간 {routeInfo.riskSections.length}개 발견</span>
+                : <span className="risk-summary-text safe-text">안전한 경로입니다</span>
+              }
+            </div>
+
+            {routeInfo.riskSections.length > 0 && (
+              <div className="risk-section-list">
+                {routeInfo.riskSections.map((rs, i) => {
+                  const levelClass = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? 'high'
+                    : rs.riskLevel === 'MEDIUM' ? 'medium' : 'low';
+                  const levelLabel = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? '위험'
+                    : rs.riskLevel === 'MEDIUM' ? '주의' : '양호';
+                  return (
+                    <div key={i} className="risk-section-item">
+                      <div className="risk-section-info">
+                        <span className="risk-section-name">{rs.name || `위험구간 ${i + 1}`}</span>
+                        <span className="risk-section-detail">경사 {rs.grade ? rs.grade.toFixed(1) + '%' : '-'} · 경로에서 {rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(0) + 'm' : '-'}</span>
+                      </div>
+                      <span className={`risk-badge ${levelClass}`}>{levelLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -473,47 +688,111 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
   );
 }
 
-function UphillPanel() {
+const REGION_OPTIONS = [
+  { label: '전체 지역', value: '' },
+  { label: '성남시', value: '41130' },
+  { label: '수정구', value: '41131' },
+  { label: '중원구', value: '41133' },
+  { label: '분당구', value: '41135' },
+];
+
+const RISK_FILTER_OPTIONS = [
+  { label: '위험도 전체', value: '' },
+  { label: '위험 (HIGH)', value: 'HIGH' },
+  { label: '주의 (MEDIUM)', value: 'MEDIUM' },
+  { label: '양호 (LOW)', value: 'LOW' },
+];
+
+const FALLBACK_DATA = [
+  { name: '광교산 오르막', regionCode: '', grade: 12, riskLevel: 'HIGH', latitude: 37.28, longitude: 127.05 },
+  { name: '청계산 진입로', regionCode: '', grade: 9, riskLevel: 'MEDIUM', latitude: 37.41, longitude: 127.05 },
+  { name: '북한산 순환로', regionCode: '', grade: 7, riskLevel: 'LOW', latitude: 37.66, longitude: 126.98 },
+];
+
+function UphillPanel({ onItemClick }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [regionCode, setRegionCode] = useState('');
+  const [riskLevel, setRiskLevel] = useState('');
+
+  const fetchData = useCallback(async (region, risk) => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams();
+      if (region) params.append('regionCode', region);
+      if (risk) params.append('riskLevel', risk);
+      const url = `${API_BASE}/steep-slope${params.toString() ? '?' + params.toString() : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('데이터를 불러올 수 없습니다.');
+      const data = await res.json();
+      setItems(data);
+    } catch (err) {
+      console.error('급경사지 데이터 로드 실패:', err);
+      setError(err.message);
+      setItems(FALLBACK_DATA);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData(regionCode, riskLevel);
+  }, [fetchData, regionCode, riskLevel]);
+
+  const getRiskClass = (level) => {
+    if (level === 'VERY_HIGH' || level === 'HIGH') return 'high';
+    if (level === 'MEDIUM') return 'medium';
+    return 'low';
+  };
+
+  const getRiskLabel = (level) => {
+    if (level === 'VERY_HIGH') return '매우위험';
+    if (level === 'HIGH') return '위험';
+    if (level === 'MEDIUM') return '주의';
+    return '양호';
+  };
+
   return (
     <div className="content-section">
       <h3 className="section-title">오르막길 구간</h3>
-      <p className="section-desc">경기도 내 오르막길 안전 구간 정보입니다.</p>
+      <p className="section-desc">경기도 내 급경사지 안전 정보입니다. ({items.length}건)</p>
 
       <div className="filter-row">
-        <select className="filter-select">
-          <option>전체 지역</option>
-          <option>수원시</option>
-          <option>성남시</option>
-          <option>고양시</option>
-          <option>용인시</option>
+        <select className="filter-select" value={regionCode} onChange={(e) => setRegionCode(e.target.value)}>
+          {REGION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <select className="filter-select">
-          <option>위험도 전체</option>
-          <option>높음</option>
-          <option>보통</option>
-          <option>낮음</option>
+        <select className="filter-select" value={riskLevel} onChange={(e) => setRiskLevel(e.target.value)}>
+          {RISK_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
 
+      {loading && <p className="loading-text">데이터 로딩 중...</p>}
+      {error && <p className="route-error">{error} (기본 데이터 표시)</p>}
+
       <div className="segment-list">
-        {[
-          { name: '광교산 오르막', city: '수원시', grade: '12%', risk: 'high' },
-          { name: '청계산 진입로', city: '성남시', grade: '9%', risk: 'medium' },
-          { name: '북한산 순환로', city: '고양시', grade: '7%', risk: 'low' },
-        ].map((item, i) => (
-          <div key={i} className="segment-item">
+        {items.map((item, i) => (
+          <div
+            key={item.id || i}
+            className="segment-item"
+            onClick={() => item.latitude && item.longitude && onItemClick?.(item.latitude, item.longitude, item.name)}
+          >
             <div className="segment-info">
-              <span className="segment-name">{item.name}</span>
-              <span className="segment-city">{item.city}</span>
+              <span className="segment-name">{item.name || '이름 없음'}</span>
+              <span className="segment-city">{item.source || ''} {item.regionCode ? `(${item.regionCode})` : ''}</span>
             </div>
             <div className="segment-meta">
-              <span className="grade-badge">경사 {item.grade}</span>
-              <span className={`risk-badge ${item.risk}`}>
-                {item.risk === 'high' ? '위험' : item.risk === 'medium' ? '주의' : '양호'}
+              <span className="grade-badge">경사 {item.grade != null ? item.grade.toFixed(1) + '%' : '-'}</span>
+              <span className={`risk-badge ${getRiskClass(item.riskLevel)}`}>
+                {getRiskLabel(item.riskLevel)}
               </span>
             </div>
           </div>
         ))}
+        {!loading && items.length === 0 && (
+          <p className="empty-text">조건에 맞는 데이터가 없습니다.</p>
+        )}
       </div>
     </div>
   );

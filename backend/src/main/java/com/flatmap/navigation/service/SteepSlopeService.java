@@ -16,7 +16,7 @@ public class SteepSlopeService {
     private static final Logger log = LoggerFactory.getLogger(SteepSlopeService.class);
 
     // 경로 좌표에서 이 반경(미터) 이내의 급경사지를 위험구간으로 판별
-    private static final double RISK_RADIUS_METERS = 50.0;
+    private static final double RISK_RADIUS_METERS = 200.0;
 
     private final SteepSlopeAreaRepository repository;
 
@@ -38,37 +38,54 @@ public class SteepSlopeService {
 
         log.info("급경사지 데이터 {}건과 경로 좌표 {}개 비교 시작", allAreas.size(), routeCoords.size());
 
-        // 이미 매칭된 급경사지 ID를 추적하여 중복 방지
-        Set<Long> matchedIds = new HashSet<>();
+        // 1단계: 각 급경사지별 경로 최소거리 계산 (2-pass 방식)
         List<RiskSection> riskSections = new ArrayList<>();
 
-        for (RouteResponse.Coord coord : routeCoords) {
-            for (SteepSlopeArea area : allAreas) {
-                if (matchedIds.contains(area.getId())) continue;
-                if (area.getLatitude() == null || area.getLongitude() == null) continue;
+        for (SteepSlopeArea area : allAreas) {
+            if (area.getLatitude() == null || area.getLongitude() == null) continue;
 
+            double minDist = Double.MAX_VALUE;
+            int minIdx = -1;
+
+            for (int i = 0; i < routeCoords.size(); i++) {
+                RouteResponse.Coord coord = routeCoords.get(i);
                 double distance = haversineMeters(
                         coord.getLat(), coord.getLng(),
                         area.getLatitude(), area.getLongitude()
                 );
-
-                if (distance <= RISK_RADIUS_METERS) {
-                    matchedIds.add(area.getId());
-                    riskSections.add(new RiskSection(
-                            area.getLatitude(),
-                            area.getLongitude(),
-                            area.getName(),
-                            area.getGrade() != null ? area.getGrade() : 0.0,
-                            area.getRiskLevel(),
-                            distance
-                    ));
-                    log.debug("위험구간 감지: {} (경사도 {}%, 경로에서 {}m)",
-                            area.getName(), area.getGrade(), Math.round(distance));
+                if (distance < minDist) {
+                    minDist = distance;
+                    minIdx = i;
                 }
+            }
+
+            // 디버깅 로그 (1000m 이내만)
+            if (minDist < 1000) {
+                String status = minDist <= RISK_RADIUS_METERS ? "MATCHED" : "MISS";
+                log.info("[거리분석] {} : 최소 {}m (좌표[{}]) → {}",
+                        area.getName(), Math.round(minDist), minIdx, status);
+            }
+
+            // 2단계: 반경 이내이면 위험구간으로 추가
+            if (minDist <= RISK_RADIUS_METERS) {
+                riskSections.add(new RiskSection(
+                        area.getLatitude(),
+                        area.getLongitude(),
+                        area.getName(),
+                        area.getGrade() != null ? area.getGrade() : 0.0,
+                        area.getRiskLevel(),
+                        minDist,
+                        minIdx
+                ));
+                log.info("위험구간 감지: {} (경사도 {}%, 경로에서 {}m, 좌표인덱스 {})",
+                        area.getName(), area.getGrade(), Math.round(minDist), minIdx);
             }
         }
 
-        log.info("위험구간 판별 완료: {}건 감지", riskSections.size());
+        // nearestRouteIdx 기준으로 경로 순서대로 정렬
+        riskSections.sort(Comparator.comparingInt(RiskSection::getNearestRouteIdx));
+
+        log.info("위험구간 판별 완료: {}건 감지 (반경 {}m)", riskSections.size(), RISK_RADIUS_METERS);
         return riskSections;
     }
 

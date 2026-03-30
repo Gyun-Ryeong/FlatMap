@@ -217,6 +217,9 @@ public class DisasterDataService {
             return null;
         }
 
+        log.info("[RAW-RESPONSE] {} API 응답 전체 (page={}): {}", apiId, page,
+                rawResponse != null ? rawResponse.substring(0, Math.min(rawResponse.length(), 2000)) : "null");
+
         if (rawResponse == null || rawResponse.trim().startsWith("<")) {
             log.error("{} JSON이 아닌 응답 반환 (서버 장애 가능)", apiId);
             return null;

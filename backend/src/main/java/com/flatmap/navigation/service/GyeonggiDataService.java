@@ -211,7 +211,10 @@ public class GyeonggiDataService {
                 "https://openapi.gg.go.kr/UphillLane?KEY=%s&Type=json&pIndex=%d&pSize=%d",
                 apiKeyConfig.getGyeonggiUphillLaneApiKey(), page, size);
         log.info("[DEBUG] 오르막차로 API 호출: {}", url.replace(apiKeyConfig.getGyeonggiUphillLaneApiKey(), "***"));
-        return restTemplate.getForObject(url, String.class);
+        String response = restTemplate.getForObject(url, String.class);
+        log.info("[RAW-RESPONSE] 오르막차로 API 응답 전체 (page={}, size={}): {}", page, size,
+                response != null ? response.substring(0, Math.min(response.length(), 2000)) : "null");
+        return response;
     }
 
     public String getSeniorWelfareFacilities(int page, int size) {

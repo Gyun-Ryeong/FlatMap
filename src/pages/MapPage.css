@@ -286,17 +286,92 @@
   border-radius: 6px;
 }
 
-/* 경로 결과 정보 */
+/* 경로 결과 섹션 */
+.route-result-section {
+  margin-bottom: 12px;
+}
+
 .route-result-info {
   display: flex;
   justify-content: space-around;
   padding: 10px;
   background: #f0fdf6;
   border-radius: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   font-size: 13px;
   font-weight: 600;
   color: #03C75A;
+}
+
+/* 위험구간 요약 */
+.risk-summary {
+  background: #f8f8f8;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.risk-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.overall-risk-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.overall-risk-badge.safe { background: #e8f5e9; color: #2e7d32; }
+.overall-risk-badge.caution { background: #fff3e0; color: #e65100; }
+.overall-risk-badge.danger { background: #ffebee; color: #c62828; }
+
+.risk-summary-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.risk-summary-text.safe-text { color: #2e7d32; }
+
+.risk-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.risk-section-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #fff;
+  border-radius: 6px;
+  border-left: 3px solid #ddd;
+}
+
+.risk-section-item:has(.risk-badge.high) { border-left-color: #F44336; }
+.risk-section-item:has(.risk-badge.medium) { border-left-color: #FF5722; }
+.risk-section-item:has(.risk-badge.low) { border-left-color: #FF9800; }
+
+.risk-section-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.risk-section-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #222;
+}
+
+.risk-section-detail {
+  font-size: 11px;
+  color: #888;
 }
 
 /* 버튼 비활성화 */
@@ -599,3 +674,105 @@
   80% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* 위험구간 지도 오버레이 마커 */
+.risk-overlay-marker {
+  cursor: pointer;
+}
+
+.risk-overlay-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  border: 2px solid #fff;
+  transition: transform 0.15s;
+}
+
+.risk-overlay-icon:hover {
+  transform: scale(1.2);
+}
+
+.risk-overlay-icon.high { background: #F44336; }
+.risk-overlay-icon.medium { background: #FF5722; }
+.risk-overlay-icon.low { background: #FF9800; }
+
+/* 위험구간 InfoWindow */
+.risk-info-window {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  min-width: 180px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.risk-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #f8f8f8;
+  border-bottom: 1px solid #eee;
+}
+
+.risk-info-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #222;
+}
+
+.risk-info-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.risk-info-close:hover { color: #333; }
+
+.risk-info-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.risk-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #555;
+}
+
+.risk-info-row strong {
+  color: #222;
+}
+
+/* 로딩/빈 상태 텍스트 */
+.loading-text {
+  text-align: center;
+  font-size: 13px;
+  color: #888;
+  padding: 20px 0;
+}
+
+.empty-text {
+  text-align: center;
+  font-size: 12px;
+  color: #aaa;
+  padding: 16px 0;
+}
+
+/* VERY_HIGH 뱃지 (HIGH와 동일 스타일) */
+.risk-badge.very_high { background: #ffebee; color: #c62828; }

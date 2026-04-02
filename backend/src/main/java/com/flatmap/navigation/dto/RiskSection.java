@@ -25,6 +25,7 @@ public class RiskSection {
     public String getName() { return name; }
     public double getGrade() { return grade; }
     public String getRiskLevel() { return riskLevel; }
+    public void setRiskLevel(String riskLevel) { this.riskLevel = riskLevel; }
     public double getDistanceFromRoute() { return distanceFromRoute; }
     public int getNearestRouteIdx() { return nearestRouteIdx; }
 }

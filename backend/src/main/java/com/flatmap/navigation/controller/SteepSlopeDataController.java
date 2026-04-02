@@ -15,7 +15,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/steep-slope")
-@CrossOrigin(origins = "http://localhost:3000")
 public class SteepSlopeDataController {
 
     private static final Logger log = LoggerFactory.getLogger(SteepSlopeDataController.class);
@@ -141,6 +140,16 @@ public class SteepSlopeDataController {
         return ResponseEntity.ok(stats);
     }
 
+    /** 위험도별 통계 (SafetyPanel용) */
+    @GetMapping("/risk-stats")
+    public ResponseEntity<Map<String, Object>> getRiskStats() {
+        List<SteepSlopeArea> all = repository.findAll();
+        long high = all.stream().filter(a -> "HIGH".equals(a.getRiskLevel()) || "VERY_HIGH".equals(a.getRiskLevel())).count();
+        long medium = all.stream().filter(a -> "MEDIUM".equals(a.getRiskLevel())).count();
+        long low = all.stream().filter(a -> "LOW".equals(a.getRiskLevel())).count();
+        return ResponseEntity.ok(Map.of("high", high, "medium", medium, "low", low));
+    }
+
     /** 테스트용 더미 데이터 삽입 (성남시 수정구/중원구/분당구) */
     @PostMapping("/seed")
     public ResponseEntity<Map<String, Object>> seedDummyData() {
@@ -148,21 +157,22 @@ public class SteepSlopeDataController {
 
         List<SteepSlopeArea> dummyData = new ArrayList<>();
 
-        // === 수정구 (41131) — 신구대학교~산성역 경로 근처 ===
-        dummyData.add(new SteepSlopeArea("수정구 산성동 급경사 구간", 37.4566, 127.0101, 12.5, "HIGH", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("수정구 신흥동 오르막길", 37.4516, 127.0143, 8.3, "MEDIUM", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("수정구 태평동 경사로", 37.4524, 127.0121, 15.7, "VERY_HIGH", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("수정구 복정동 급경사지", 37.4540, 127.0106, 6.2, "MEDIUM", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("신구대학교 북측 경사로", 37.4507, 127.0142, 18.4, "VERY_HIGH", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("산성역 인근 오르막", 37.4555, 127.0094, 9.8, "MEDIUM", "DUMMY", "41131"));
-        dummyData.add(new SteepSlopeArea("수정구 단대동 언덕길", 37.4538, 127.0113, 7.1, "MEDIUM", "DUMMY", "41131"));
+        // === 수정구 (41131) — 신구대학교~산성역 실제 도보 경로 위 좌표 ===
+        // 경로 경도 범위: 127.126 ~ 127.147, 위도 범위: 37.443 ~ 37.458
+        dummyData.add(new SteepSlopeArea("신구대학교 정문 앞 급경사", 37.4438, 127.1468, 12.5, "HIGH", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("복정동 오르막길", 37.4462, 127.1458, 8.3, "MEDIUM", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("수정구 위례순환로 급경사", 37.4486, 127.1425, 15.7, "VERY_HIGH", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("수정구 복정동 언덕길", 37.4479, 127.1394, 6.2, "MEDIUM", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("단대동 경사 구간", 37.4468, 127.1356, 18.4, "VERY_HIGH", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("산성역 방면 오르막", 37.4494, 127.1332, 9.8, "MEDIUM", "DUMMY", "41131"));
+        dummyData.add(new SteepSlopeArea("산성역 인근 급경사지", 37.4564, 127.1268, 7.1, "MEDIUM", "DUMMY", "41131"));
 
-        // === 중원구 (41133) ===
-        dummyData.add(new SteepSlopeArea("중원구 성남동 급경사", 37.4410, 127.0098, 11.2, "HIGH", "DUMMY", "41133"));
-        dummyData.add(new SteepSlopeArea("중원구 중앙동 오르막길", 37.4395, 127.0135, 5.5, "MEDIUM", "DUMMY", "41133"));
-        dummyData.add(new SteepSlopeArea("중원구 금광동 경사구간", 37.4450, 127.0050, 14.3, "HIGH", "DUMMY", "41133"));
-        dummyData.add(new SteepSlopeArea("중원구 은행동 급경사지", 37.4365, 127.0180, 16.8, "VERY_HIGH", "DUMMY", "41133"));
-        dummyData.add(new SteepSlopeArea("중원구 여수동 언덕", 37.4330, 127.0070, 7.9, "MEDIUM", "DUMMY", "41133"));
+        // === 중원구 (41133) — 성남시 중원구 주요 경사 구간 ===
+        dummyData.add(new SteepSlopeArea("중원구 성남동 급경사", 37.4440, 127.1380, 11.2, "HIGH", "DUMMY", "41133"));
+        dummyData.add(new SteepSlopeArea("중원구 중앙동 오르막길", 37.4420, 127.1410, 5.5, "MEDIUM", "DUMMY", "41133"));
+        dummyData.add(new SteepSlopeArea("중원구 금광동 경사구간", 37.4455, 127.1350, 14.3, "HIGH", "DUMMY", "41133"));
+        dummyData.add(new SteepSlopeArea("중원구 은행동 급경사지", 37.4390, 127.1440, 16.8, "VERY_HIGH", "DUMMY", "41133"));
+        dummyData.add(new SteepSlopeArea("중원구 여수동 언덕", 37.4410, 127.1320, 7.9, "MEDIUM", "DUMMY", "41133"));
 
         // === 분당구 (41135) ===
         dummyData.add(new SteepSlopeArea("분당구 정자동 경사로", 37.3660, 127.1085, 5.8, "MEDIUM", "DUMMY", "41135"));

@@ -9,7 +9,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/segments")
-@CrossOrigin(origins = "http://localhost:3000")
 public class RoadSegmentController {
 
     private final RoadSegmentRepository repository;

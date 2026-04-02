@@ -36,6 +36,42 @@ function MapPage() {
   const [kakaoReady, setKakaoReady] = useState(false);
   const [locationMsg, setLocationMsg] = useState('');
   const [defaultOrigin, setDefaultOrigin] = useState(null);
+  const [mapWeather, setMapWeather] = useState(null);
+  const detourPolylinesRef = useRef([]);
+  const detourMarkersRef = useRef([]);
+  const [layerMarkers, setLayerMarkers] = useState({ lights: [], accidents: [], cctv: [] });
+  const layerMarkersRef = useRef({ lights: [], accidents: [], cctv: [] });
+
+  const clearLayerMarkers = useCallback((type) => {
+    if (!layerMarkersRef.current[type]) return;
+    layerMarkersRef.current[type].forEach((m) => m.setMap(null));
+    layerMarkersRef.current[type] = [];
+  }, []);
+
+  const showLayerMarkers = useCallback((type, items, emoji) => {
+    if (!mapInstanceRef.current || !window.kakao?.maps) return;
+    const kakao = window.kakao;
+    clearLayerMarkers(type);
+
+    const newMarkers = items.slice(0, 100).map((item) => {
+      if (!item.latitude || !item.longitude) return null;
+      const content = document.createElement('div');
+      content.className = 'layer-marker';
+      content.textContent = emoji;
+      content.title = item.name || '';
+
+      const overlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(item.latitude, item.longitude),
+        content,
+        map: mapInstanceRef.current,
+        yAnchor: 0.5,
+        zIndex: 80,
+      });
+      return overlay;
+    }).filter(Boolean);
+
+    layerMarkersRef.current[type] = newMarkers;
+  }, [clearLayerMarkers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,11 +122,19 @@ function MapPage() {
     });
   }, []);
 
+  const fetchMapWeather = useCallback((lat, lng) => {
+    fetch(`${API_BASE}/weather?lat=${lat}&lng=${lng}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => { if (data) setMapWeather(data); })
+      .catch(() => {});
+  }, []);
+
   const requestCurrentLocation = useCallback((kakao) => {
     if (!navigator.geolocation) {
       console.log('Geolocation 미지원');
       setLocationMsg('브라우저가 위치 서비스를 지원하지 않습니다.');
       setTimeout(() => setLocationMsg(''), 3000);
+      fetchMapWeather(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
       return;
     }
 
@@ -104,6 +148,7 @@ function MapPage() {
         mapInstanceRef.current.setLevel(4);
         showMyLocationMarker(kakao, lat, lng);
         reverseGeocode(kakao, lat, lng);
+        fetchMapWeather(lat, lng);
       },
       (err) => {
         console.warn('위치 권한 거부:', err.message);
@@ -111,10 +156,11 @@ function MapPage() {
         setLocationMsg('위치 권한이 거부되어 기본 위치로 설정됩니다.');
         setTimeout(() => setLocationMsg(''), 3000);
         reverseGeocode(kakao, DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+        fetchMapWeather(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
       },
       { enableHighAccuracy: true, timeout: 5000 }
     );
-  }, [showMyLocationMarker, reverseGeocode]);
+  }, [showMyLocationMarker, reverseGeocode, fetchMapWeather]);
 
   const handleMyLocation = useCallback(() => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -142,6 +188,13 @@ function MapPage() {
     );
   }, [showMyLocationMarker]);
 
+  const clearDetour = useCallback(() => {
+    detourPolylinesRef.current.forEach((p) => p.setMap(null));
+    detourPolylinesRef.current = [];
+    detourMarkersRef.current.forEach((m) => m.setMap(null));
+    detourMarkersRef.current = [];
+  }, []);
+
   const clearRoute = useCallback(() => {
     polylinesRef.current.forEach((p) => p.setMap(null));
     polylinesRef.current = [];
@@ -149,7 +202,8 @@ function MapPage() {
     markersRef.current = [];
     overlaysRef.current.forEach((o) => o.setMap(null));
     overlaysRef.current = [];
-  }, []);
+    clearDetour();
+  }, [clearDetour]);
 
   const drawRoute = useCallback((coords, riskSections = []) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -329,6 +383,121 @@ function MapPage() {
     console.log('경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
   }, [clearRoute]);
 
+  const setRouteOpacity = useCallback((opacity) => {
+    polylinesRef.current.forEach((p) => p.setOptions({ strokeOpacity: opacity }));
+  }, []);
+
+  const drawDetourRoute = useCallback((coords, riskSections = []) => {
+    if (!mapInstanceRef.current || !window.kakao?.maps) return;
+    const kakao = window.kakao;
+    clearDetour();
+
+    const path = coords.map((c) => new kakao.maps.LatLng(c.lat, c.lng));
+    if (path.length === 0) return;
+
+    // 원래 경로 투명도 낮춤
+    setRouteOpacity(0.4);
+
+    if (!riskSections || riskSections.length === 0) {
+      // 안전한 우회 경로: 파란 점선
+      const line = new kakao.maps.Polyline({
+        map: mapInstanceRef.current,
+        path,
+        strokeWeight: 6,
+        strokeColor: '#2196F3',
+        strokeOpacity: 0.9,
+        strokeStyle: 'shortdash',
+      });
+      detourPolylinesRef.current.push(line);
+    } else {
+      // 우회 경로에도 위험구간이 있는 경우
+      const SPREAD = 8;
+      const riskRanges = riskSections
+        .map((rs) => ({
+          start: Math.max(0, rs.nearestRouteIdx - SPREAD),
+          end: Math.min(coords.length - 1, rs.nearestRouteIdx + SPREAD),
+          riskLevel: rs.riskLevel,
+        }))
+        .sort((a, b) => a.start - b.start);
+
+      const merged = [];
+      for (const r of riskRanges) {
+        if (merged.length > 0 && r.start <= merged[merged.length - 1].end + 1) {
+          const last = merged[merged.length - 1];
+          last.end = Math.max(last.end, r.end);
+        } else {
+          merged.push({ ...r });
+        }
+      }
+
+      let cursor = 0;
+      for (const range of merged) {
+        if (cursor < range.start) {
+          const safePath = path.slice(cursor, range.start + 1);
+          if (safePath.length >= 2) {
+            detourPolylinesRef.current.push(new kakao.maps.Polyline({
+              map: mapInstanceRef.current, path: safePath,
+              strokeWeight: 6, strokeColor: '#2196F3', strokeOpacity: 0.9, strokeStyle: 'shortdash',
+            }));
+          }
+        }
+        const riskPath = path.slice(range.start, range.end + 1);
+        if (riskPath.length >= 2) {
+          detourPolylinesRef.current.push(new kakao.maps.Polyline({
+            map: mapInstanceRef.current, path: riskPath,
+            strokeWeight: 7, strokeColor: '#FF5722', strokeOpacity: 0.9, strokeStyle: 'shortdash',
+          }));
+        }
+        cursor = range.end;
+      }
+      if (cursor < path.length - 1) {
+        const safePath = path.slice(cursor);
+        if (safePath.length >= 2) {
+          detourPolylinesRef.current.push(new kakao.maps.Polyline({
+            map: mapInstanceRef.current, path: safePath,
+            strokeWeight: 6, strokeColor: '#2196F3', strokeOpacity: 0.9, strokeStyle: 'shortdash',
+          }));
+        }
+      }
+    }
+
+    // 우회 경로 출발/도착 마커
+    if (path.length >= 2) {
+      const bounds = new kakao.maps.LatLngBounds();
+      path.forEach((p) => bounds.extend(p));
+      polylinesRef.current.forEach((pl) => {
+        const plPath = pl.getPath();
+        plPath.forEach((p) => bounds.extend(p));
+      });
+      mapInstanceRef.current.setBounds(bounds);
+    }
+
+    console.log('우회 경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
+  }, [clearDetour, setRouteOpacity]);
+
+  const selectRoute = useCallback((type) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (type === 'original') {
+      // 원래 경로 표시
+      polylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.8 }); });
+      overlaysRef.current.forEach((o) => o.setMap(map));
+      markersRef.current.forEach((m) => m.setMap(map));
+      // 우회 경로 숨기기
+      detourPolylinesRef.current.forEach((p) => p.setMap(null));
+      detourMarkersRef.current.forEach((m) => m.setMap(null));
+    } else {
+      // 원래 경로 숨기기
+      polylinesRef.current.forEach((p) => p.setMap(null));
+      overlaysRef.current.forEach((o) => o.setMap(null));
+      // 우회 경로 표시
+      detourPolylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.9 }); });
+      detourMarkersRef.current.forEach((m) => m.setMap(map));
+      markersRef.current.forEach((m) => m.setMap(map));
+    }
+  }, []);
+
   const moveToLocation = useCallback((lat, lng, name) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
     const kakao = window.kakao;
@@ -377,6 +546,9 @@ function MapPage() {
         </svg>
       </button>
 
+      {/* 날씨 미니 오버레이 */}
+      {mapWeather && <WeatherMiniOverlay weather={mapWeather} />}
+
       {/* 위치 안내 메시지 */}
       {locationMsg && <div className="location-toast">{locationMsg}</div>}
 
@@ -419,9 +591,9 @@ function MapPage() {
 
         {/* 탭 콘텐츠 */}
         <div className="tab-content">
-          {activeTab === 'route' && <RoutePanel kakaoReady={kakaoReady} onRouteFound={drawRoute} defaultOrigin={defaultOrigin} />}
+          {activeTab === 'route' && <RoutePanel kakaoReady={kakaoReady} onRouteFound={drawRoute} onDetourFound={drawDetourRoute} onSelectRoute={selectRoute} defaultOrigin={defaultOrigin} />}
           {activeTab === 'uphill' && <UphillPanel onItemClick={moveToLocation} />}
-          {activeTab === 'safety' && <SafetyPanel />}
+          {activeTab === 'safety' && <SafetyPanel onToggleLayer={showLayerMarkers} onClearLayer={clearLayerMarkers} />}
         </div>
       </div>
     </div>
@@ -516,7 +688,7 @@ function PlaceSearchInput({ placeholder, value, onChange, onClear, onSelect, dot
   );
 }
 
-function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
+function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, defaultOrigin }) {
   const [originText, setOriginText] = useState('');
   const [destText, setDestText] = useState('');
   const [originPlace, setOriginPlace] = useState(null);
@@ -525,6 +697,11 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [routeInfo, setRouteInfo] = useState(null);
+  const [detourInfo, setDetourInfo] = useState(null);
+  const [detourLoading, setDetourLoading] = useState(false);
+  const [detourError, setDetourError] = useState('');
+  const [selectedRoute, setSelectedRoute] = useState(null); // 'original' | 'detour' | null
+  const routeDataRef = useRef(null); // 원래 경로 전체 데이터 저장
   const defaultAppliedRef = useRef(false);
 
   useEffect(() => {
@@ -543,58 +720,109 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
   ];
 
   const handleSearch = async () => {
-    if (!originPlace) {
-      setError('출발지를 검색하여 선택해주세요.');
-      return;
-    }
-    if (!destPlace) {
-      setError('도착지를 검색하여 선택해주세요.');
-      return;
-    }
+    if (!originPlace) { setError('출발지를 검색하여 선택해주세요.'); return; }
+    if (!destPlace) { setError('도착지를 검색하여 선택해주세요.'); return; }
 
     setError('');
     setLoading(true);
     setRouteInfo(null);
-    console.log('경로 검색 요청:', { origin: originPlace, dest: destPlace, option: routeOption });
+    setDetourInfo(null);
+    setDetourError('');
+    setSelectedRoute(null);
 
     try {
       const res = await fetch(`${API_BASE}/route/walk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          originLng: originPlace.lng,
-          originLat: originPlace.lat,
-          destLng: destPlace.lng,
-          destLat: destPlace.lat,
+          originLng: originPlace.lng, originLat: originPlace.lat,
+          destLng: destPlace.lng, destLat: destPlace.lat,
           option: routeOption,
         }),
       });
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        console.error('경로 검색 실패:', res.status, errBody);
-        throw new Error('경로를 찾을 수 없습니다.');
-      }
-
+      if (!res.ok) throw new Error('경로를 찾을 수 없습니다.');
       const data = await res.json();
-      console.log('경로 검색 응답:', data);
 
+      routeDataRef.current = data;
       setRouteInfo({
         distance: data.totalDistance,
         duration: data.totalDuration,
         riskSections: data.riskSections || [],
         overallRisk: data.overallRisk || 'SAFE',
+        weather: data.weather || null,
       });
 
       if (data.coords && data.coords.length > 0) {
         onRouteFound(data.coords, data.riskSections || []);
       }
+
+      // 안전 우선 모드 + 위험구간 있으면 자동으로 우회 경로도 검색
+      if (routeOption === 'SAFE' && data.riskSections && data.riskSections.length > 0) {
+        searchDetour(data);
+      }
     } catch (err) {
-      console.error('경로 검색 에러:', err);
       setError(err.message || '경로 검색 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const searchDetour = async (originalData) => {
+    const data = originalData || routeDataRef.current;
+    if (!data || !data.riskSections || data.riskSections.length === 0) return;
+
+    setDetourLoading(true);
+    setDetourError('');
+    setDetourInfo(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/route/walk/detour`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originLng: originPlace.lng, originLat: originPlace.lat,
+          destLng: destPlace.lng, destLat: destPlace.lat,
+          option: routeOption,
+          avoidPoints: data.riskSections.map((rs) => ({
+            lat: rs.lat, lng: rs.lng,
+            riskLevel: rs.riskLevel,
+            nearestRouteIdx: rs.nearestRouteIdx,
+          })),
+        }),
+      });
+
+      if (!res.ok) throw new Error('우회 경로를 찾을 수 없습니다.');
+      const detour = await res.json();
+
+      setDetourInfo({
+        distance: detour.totalDistance,
+        duration: detour.totalDuration,
+        riskSections: detour.riskSections || [],
+        overallRisk: detour.overallRisk || 'SAFE',
+        coords: detour.coords,
+      });
+
+      if (detour.coords && detour.coords.length > 0) {
+        onDetourFound(detour.coords, detour.riskSections || []);
+      }
+    } catch (err) {
+      console.error('우회 경로 검색 실패:', err);
+      setDetourError(err.message || '우회 경로를 찾을 수 없습니다. 원래 경로를 이용해주세요.');
+    } finally {
+      setDetourLoading(false);
+    }
+  };
+
+  const handleSelectRoute = (type) => {
+    setSelectedRoute(type);
+    onSelectRoute(type);
+  };
+
+  const riskBadge = (risk) => {
+    const cls = risk === 'DANGER' ? 'danger' : risk === 'CAUTION' ? 'caution' : 'safe';
+    const lbl = risk === 'DANGER' ? '위험' : risk === 'CAUTION' ? '주의' : '안전';
+    return <span className={`overall-risk-badge ${cls}`}>{lbl}</span>;
   };
 
   return (
@@ -602,23 +830,15 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
       <h3 className="section-title">경로 찾기</h3>
       <div className="route-inputs">
         <PlaceSearchInput
-          placeholder="출발지 입력"
-          value={originText}
-          onChange={(v) => { setOriginText(v); }}
-          onClear={() => setOriginPlace(null)}
-          onSelect={setOriginPlace}
-          dotClass="start"
-          kakaoReady={kakaoReady}
+          placeholder="출발지 입력" value={originText}
+          onChange={(v) => setOriginText(v)} onClear={() => setOriginPlace(null)}
+          onSelect={setOriginPlace} dotClass="start" kakaoReady={kakaoReady}
         />
         <div className="route-input-divider" />
         <PlaceSearchInput
-          placeholder="도착지 입력"
-          value={destText}
-          onChange={(v) => { setDestText(v); }}
-          onClear={() => setDestPlace(null)}
-          onSelect={setDestPlace}
-          dotClass="end"
-          kakaoReady={kakaoReady}
+          placeholder="도착지 입력" value={destText}
+          onChange={(v) => setDestText(v)} onClear={() => setDestPlace(null)}
+          onSelect={setDestPlace} dotClass="end" kakaoReady={kakaoReady}
         />
       </div>
 
@@ -630,43 +850,100 @@ function RoutePanel({ kakaoReady, onRouteFound, defaultOrigin }) {
 
       {routeInfo && (
         <div className="route-result-section">
-          <div className="route-result-info">
-            <span>거리: {(routeInfo.distance / 1000).toFixed(1)}km</span>
-            <span>예상 시간: {Math.round(routeInfo.duration / 60)}분</span>
-          </div>
+          {/* 날씨 정보 */}
+          {routeInfo.weather && <WeatherCard weather={routeInfo.weather} />}
 
-          {/* 위험구간 요약 */}
-          <div className="risk-summary">
-            <div className="risk-summary-header">
-              <span className={`overall-risk-badge ${routeInfo.overallRisk === 'DANGER' ? 'danger' : routeInfo.overallRisk === 'CAUTION' ? 'caution' : 'safe'}`}>
-                {routeInfo.overallRisk === 'DANGER' ? '위험' : routeInfo.overallRisk === 'CAUTION' ? '주의' : '안전'}
-              </span>
-              {routeInfo.riskSections.length > 0
-                ? <span className="risk-summary-text">위험구간 {routeInfo.riskSections.length}개 발견</span>
-                : <span className="risk-summary-text safe-text">안전한 경로입니다</span>
-              }
-            </div>
-
-            {routeInfo.riskSections.length > 0 && (
-              <div className="risk-section-list">
-                {routeInfo.riskSections.map((rs, i) => {
-                  const levelClass = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? 'high'
-                    : rs.riskLevel === 'MEDIUM' ? 'medium' : 'low';
-                  const levelLabel = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? '위험'
-                    : rs.riskLevel === 'MEDIUM' ? '주의' : '양호';
-                  return (
-                    <div key={i} className="risk-section-item">
-                      <div className="risk-section-info">
-                        <span className="risk-section-name">{rs.name || `위험구간 ${i + 1}`}</span>
-                        <span className="risk-section-detail">경사 {rs.grade ? rs.grade.toFixed(1) + '%' : '-'} · 경로에서 {rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(0) + 'm' : '-'}</span>
-                      </div>
-                      <span className={`risk-badge ${levelClass}`}>{levelLabel}</span>
-                    </div>
-                  );
-                })}
+          {/* 경로 비교 패널 (우회 경로가 있을 때) */}
+          {detourInfo ? (
+            <div className="route-compare">
+              <div className={`route-compare-card original${selectedRoute === 'original' ? ' selected' : ''}`}>
+                <div className="route-compare-header">
+                  <span className="route-compare-label">원래 경로</span>
+                  {riskBadge(routeInfo.overallRisk)}
+                </div>
+                <div className="route-compare-stats">
+                  <span>{(routeInfo.distance / 1000).toFixed(1)}km</span>
+                  <span>{Math.round(routeInfo.duration / 60)}분</span>
+                </div>
+                <div className="route-compare-risk">
+                  위험구간 {routeInfo.riskSections.length}개
+                </div>
+                <button className="route-select-btn" onClick={() => handleSelectRoute('original')}>
+                  {selectedRoute === 'original' ? '선택됨' : '이 경로 선택'}
+                </button>
               </div>
-            )}
-          </div>
+              <div className={`route-compare-card detour${selectedRoute === 'detour' ? ' selected' : ''}`}>
+                <div className="route-compare-header">
+                  <span className="route-compare-label">우회 경로</span>
+                  {riskBadge(detourInfo.overallRisk)}
+                </div>
+                <div className="route-compare-stats">
+                  <span>{(detourInfo.distance / 1000).toFixed(1)}km</span>
+                  <span>{Math.round(detourInfo.duration / 60)}분</span>
+                </div>
+                <div className="route-compare-risk">
+                  {detourInfo.riskSections.length > 0
+                    ? `위험구간 ${detourInfo.riskSections.length}개 (완전한 우회 어려움)`
+                    : '위험구간 없음'
+                  }
+                </div>
+                <button className="route-select-btn detour" onClick={() => handleSelectRoute('detour')}>
+                  {selectedRoute === 'detour' ? '선택됨' : '이 경로 선택'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* 단일 경로 정보 */}
+              <div className="route-result-info">
+                <span>거리: {(routeInfo.distance / 1000).toFixed(1)}km</span>
+                <span>예상 시간: {Math.round(routeInfo.duration / 60)}분</span>
+              </div>
+              <div className="risk-summary">
+                <div className="risk-summary-header">
+                  {riskBadge(routeInfo.overallRisk)}
+                  {routeInfo.riskSections.length > 0
+                    ? <span className="risk-summary-text">위험구간 {routeInfo.riskSections.length}개 발견</span>
+                    : <span className="risk-summary-text safe-text">안전한 경로입니다</span>
+                  }
+                </div>
+                {routeInfo.riskSections.length > 0 && (
+                  <div className="risk-section-list">
+                    {routeInfo.riskSections.map((rs, i) => {
+                      const levelClass = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? 'high'
+                        : rs.riskLevel === 'MEDIUM' ? 'medium' : 'low';
+                      const levelLabel = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? '위험'
+                        : rs.riskLevel === 'MEDIUM' ? '주의' : '양호';
+                      return (
+                        <div key={i} className="risk-section-item">
+                          <div className="risk-section-info">
+                            <span className="risk-section-name">{rs.name || `위험구간 ${i + 1}`}</span>
+                            <span className="risk-section-detail">경사 {rs.grade ? rs.grade.toFixed(1) + '%' : '-'} · 경로에서 {rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(0) + 'm' : '-'}</span>
+                          </div>
+                          <span className={`risk-badge ${levelClass}`}>{levelLabel}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* 우회 경로 버튼 */}
+          {routeInfo.riskSections.length > 0 && !detourInfo && routeOption !== 'SHORT' && (
+            <button
+              className="detour-btn"
+              onClick={() => searchDetour(null)}
+              disabled={detourLoading}
+            >
+              {detourLoading ? '우회 경로 검색 중...' : '\uD83D\uDD04 우회 경로 추천'}
+            </button>
+          )}
+          {detourError && <p className="route-error">{detourError}</p>}
+          {detourInfo && detourInfo.riskSections.length > 0 && (
+            <p className="detour-warning">완전한 우회가 어렵습니다. 주의하여 이동하세요.</p>
+          )}
         </div>
       )}
 
@@ -798,34 +1075,183 @@ function UphillPanel({ onItemClick }) {
   );
 }
 
-function SafetyPanel() {
+const WEATHER_ICONS = {
+  clear: '\u2600\uFE0F',
+  cloudy: '\u26C5',
+  overcast: '\u2601\uFE0F',
+  rain: '\uD83C\uDF27\uFE0F',
+  snow: '\u2744\uFE0F',
+  sleet: '\uD83C\uDF28\uFE0F',
+};
+
+function WeatherMiniOverlay({ weather }) {
+  if (!weather) return null;
+  const icon = WEATHER_ICONS[weather.icon] || '\u2600\uFE0F';
+  const hasWarning = !!weather.warning;
+
+  return (
+    <div className={`weather-mini-overlay${hasWarning ? ' warning' : ''}`}>
+      <span className="weather-mini-icon">{icon}</span>
+      <span className="weather-mini-temp">{weather.temperature != null ? Math.round(weather.temperature) : '--'}°C</span>
+      {hasWarning && <span className="weather-mini-warn">{weather.warning}</span>}
+    </div>
+  );
+}
+
+function WeatherCard({ weather }) {
+  if (!weather) return null;
+  const icon = WEATHER_ICONS[weather.icon] || '\u2600\uFE0F';
+
+  return (
+    <div className="weather-card">
+      <div className="weather-main">
+        <span className="weather-icon-large">{icon}</span>
+        <div className="weather-info">
+          <span className="weather-temp">{weather.temperature != null ? Math.round(weather.temperature) : '--'}°C</span>
+          <span className="weather-desc">{weather.description || '--'}</span>
+        </div>
+        <div className="weather-detail">
+          <span>습도 {weather.humidity ?? '--'}%</span>
+          <span>풍속 {weather.windSpeed != null ? weather.windSpeed.toFixed(1) : '--'}m/s</span>
+        </div>
+      </div>
+      {weather.warning && (
+        <div className="weather-warning">
+          <span className="warning-icon">\u26A0\uFE0F</span>
+          <span>{weather.warning}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SafetyPanel({ onToggleLayer, onClearLayer }) {
+  const [weather, setWeather] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [riskStats, setRiskStats] = useState({ high: 0, medium: 0, low: 0 });
+  const [layers, setLayers] = useState({ lights: false, accidents: false, cctv: false });
+  const [layerData, setLayerData] = useState({ lights: [], accidents: [], cctv: [] });
+
+  // 날씨 + 통계 로드
+  useEffect(() => {
+    const fetchWeather = async (lat, lng) => {
+      try {
+        const res = await fetch(`${API_BASE}/weather?lat=${lat}&lng=${lng}`);
+        if (res.ok) setWeather(await res.json());
+      } catch (err) {
+        console.error('날씨 조회 실패:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => fetchWeather(pos.coords.latitude, pos.coords.longitude),
+        () => fetchWeather(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+        { timeout: 3000 }
+      );
+    } else {
+      fetchWeather(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+    }
+
+    // 위험도별 통계
+    fetch(`${API_BASE}/steep-slope/risk-stats`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setRiskStats(d); })
+      .catch(() => {});
+  }, []);
+
+  // 레이어 토글 핸들러
+  const handleToggle = async (type) => {
+    const newState = !layers[type];
+    setLayers((prev) => ({ ...prev, [type]: newState }));
+
+    if (!newState) {
+      onClearLayer(type);
+      return;
+    }
+
+    // 데이터가 이미 있으면 재사용
+    if (layerData[type].length > 0) {
+      const emoji = type === 'lights' ? '\uD83D\uDCA1' : type === 'accidents' ? '\u26A0\uFE0F' : '\uD83D\uDCF9';
+      onToggleLayer(type, layerData[type], emoji);
+      return;
+    }
+
+    // 데이터 fetch
+    const endpoints = {
+      lights: '/safety/security-lights',
+      accidents: '/safety/accident-zones',
+      cctv: '/safety/cctv',
+    };
+    try {
+      const res = await fetch(`${API_BASE}${endpoints[type]}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLayerData((prev) => ({ ...prev, [type]: data }));
+        const emojis = { lights: '\uD83D\uDCA1', accidents: '\u26A0\uFE0F', cctv: '\uD83D\uDCF9' };
+        onToggleLayer(type, data, emojis[type]);
+      }
+    } catch (err) {
+      console.error(`${type} 데이터 로드 실패:`, err);
+    }
+  };
+
+  const getWeatherAlerts = () => {
+    if (!weather) return [];
+    const alerts = [];
+
+    if (weather.warning) {
+      alerts.push({ msg: weather.warning, time: '방금 전', level: 'high' });
+    }
+    if (weather.temperature != null && weather.temperature <= 3 && weather.temperature > 0) {
+      alerts.push({ msg: '낮은 기온, 결빙 가능성 있음', time: '방금 전', level: 'medium' });
+    }
+    if (weather.humidity != null && weather.humidity >= 90) {
+      alerts.push({ msg: '높은 습도, 노면 습기 주의', time: '방금 전', level: 'medium' });
+    }
+    if (weather.windSpeed != null && weather.windSpeed >= 8 && !(weather.windSpeed >= 10)) {
+      alerts.push({ msg: '다소 강한 바람, 노출 구간 주의', time: '방금 전', level: 'medium' });
+    }
+    if (alerts.length === 0) {
+      alerts.push({ msg: '현재 특이 기상 없음, 안전한 보행 가능', time: '방금 전', level: 'low' });
+    }
+    return alerts;
+  };
+
   return (
     <div className="content-section">
       <h3 className="section-title">안전 정보</h3>
       <p className="section-desc">실시간 도로 안전 현황입니다.</p>
 
+      {/* 날씨 카드 */}
+      {loading ? (
+        <p className="loading-text">날씨 정보 로딩 중...</p>
+      ) : (
+        <WeatherCard weather={weather} />
+      )}
+
+      {/* 위험도 통계 (실제 DB 데이터) */}
       <div className="safety-stats">
         <div className="stat-card red">
-          <span className="stat-number">3</span>
+          <span className="stat-number">{riskStats.high}</span>
           <span className="stat-label">위험 구간</span>
         </div>
         <div className="stat-card yellow">
-          <span className="stat-number">12</span>
+          <span className="stat-number">{riskStats.medium}</span>
           <span className="stat-label">주의 구간</span>
         </div>
         <div className="stat-card green">
-          <span className="stat-number">47</span>
+          <span className="stat-number">{riskStats.low}</span>
           <span className="stat-label">안전 구간</span>
         </div>
       </div>
 
+      {/* 기상 알림 (실제 날씨 기반) */}
       <div className="notice-list">
-        <p className="option-label">최근 알림</p>
-        {[
-          { msg: '광교산로 결빙 위험', time: '10분 전', level: 'high' },
-          { msg: '청계산 진입로 공사 중', time: '1시간 전', level: 'medium' },
-          { msg: '북한산 순환로 정상 운행', time: '2시간 전', level: 'low' },
-        ].map((item, i) => (
+        <p className="option-label">기상 알림</p>
+        {getWeatherAlerts().map((item, i) => (
           <div key={i} className="notice-item">
             <span className={`notice-dot ${item.level}`} />
             <div>
@@ -834,6 +1260,37 @@ function SafetyPanel() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* 지도 레이어 토글 */}
+      <div className="layer-toggles">
+        <p className="option-label">지도 레이어</p>
+        <div className="layer-toggle-list">
+          <button
+            className={`layer-toggle-btn${layers.lights ? ' active' : ''}`}
+            onClick={() => handleToggle('lights')}
+          >
+            <span className="layer-toggle-icon">{'\uD83D\uDCA1'}</span>
+            <span>보안등</span>
+            <span className={`layer-toggle-badge${layers.lights ? ' on' : ''}`}>{layers.lights ? 'ON' : 'OFF'}</span>
+          </button>
+          <button
+            className={`layer-toggle-btn${layers.accidents ? ' active' : ''}`}
+            onClick={() => handleToggle('accidents')}
+          >
+            <span className="layer-toggle-icon">{'\u26A0\uFE0F'}</span>
+            <span>사고다발지</span>
+            <span className={`layer-toggle-badge${layers.accidents ? ' on' : ''}`}>{layers.accidents ? 'ON' : 'OFF'}</span>
+          </button>
+          <button
+            className={`layer-toggle-btn${layers.cctv ? ' active' : ''}`}
+            onClick={() => handleToggle('cctv')}
+          >
+            <span className="layer-toggle-icon">{'\uD83D\uDCF9'}</span>
+            <span>CCTV</span>
+            <span className={`layer-toggle-badge${layers.cctv ? ' on' : ''}`}>{layers.cctv ? 'ON' : 'OFF'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

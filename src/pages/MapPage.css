@@ -776,3 +776,297 @@
 
 /* VERY_HIGH 뱃지 (HIGH와 동일 스타일) */
 .risk-badge.very_high { background: #ffebee; color: #c62828; }
+
+/* ========== 날씨 카드 ========== */
+.weather-card {
+  background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.weather-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.weather-icon-large {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.weather-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.weather-temp {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a237e;
+}
+
+.weather-desc {
+  font-size: 12px;
+  color: #5c6bc0;
+}
+
+.weather-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11px;
+  color: #7986cb;
+  gap: 2px;
+}
+
+.weather-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fff3e0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e65100;
+}
+
+.warning-icon {
+  font-size: 14px;
+}
+
+/* ========== 날씨 미니 오버레이 (지도 우측 상단) ========== */
+.weather-mini-overlay {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  pointer-events: auto;
+}
+
+.weather-mini-overlay.warning {
+  padding: 8px 14px 8px 12px;
+  border: 1.5px solid #ff9800;
+}
+
+.weather-mini-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.weather-mini-temp {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a237e;
+}
+
+.weather-mini-warn {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e65100;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1.5px solid #ffcc80;
+}
+
+/* ========== 레이어 토글 ========== */
+.layer-toggles {
+  margin-top: 12px;
+}
+
+.layer-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layer-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  transition: all 0.15s;
+}
+
+.layer-toggle-btn:hover {
+  border-color: #bbb;
+  background: #fafafa;
+}
+
+.layer-toggle-btn.active {
+  border-color: #42a5f5;
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.layer-toggle-icon {
+  font-size: 18px;
+}
+
+.layer-toggle-badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #eee;
+  color: #999;
+}
+
+.layer-toggle-badge.on {
+  background: #42a5f5;
+  color: #fff;
+}
+
+/* 지도 위 레이어 마커 */
+.layer-marker {
+  font-size: 20px;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+}
+
+/* ========== 우회 경로 비교 패널 ========== */
+.detour-btn {
+  width: 100%;
+  padding: 10px;
+  margin-top: 10px;
+  background: #fff;
+  color: #2196F3;
+  border: 1.5px solid #2196F3;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.detour-btn:hover {
+  background: #e3f2fd;
+}
+
+.detour-btn:disabled {
+  border-color: #90caf9;
+  color: #90caf9;
+  cursor: not-allowed;
+}
+
+.route-compare {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.route-compare-card {
+  flex: 1;
+  background: #f8f8f8;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.route-compare-card.original {
+  border-top: 3px solid #03C75A;
+}
+
+.route-compare-card.detour {
+  border-top: 3px solid #2196F3;
+}
+
+.route-compare-card.selected {
+  background: #f0fdf6;
+  border-color: #03C75A;
+  box-shadow: 0 2px 8px rgba(3, 199, 90, 0.15);
+}
+
+.route-compare-card.detour.selected {
+  background: #e3f2fd;
+  border-color: #2196F3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
+}
+
+.route-compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.route-compare-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #333;
+}
+
+.route-compare-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #222;
+}
+
+.route-compare-risk {
+  font-size: 11px;
+  color: #888;
+}
+
+.route-select-btn {
+  width: 100%;
+  padding: 7px;
+  background: #03C75A;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.route-select-btn:hover {
+  background: #02b350;
+}
+
+.route-select-btn.detour {
+  background: #2196F3;
+}
+
+.route-select-btn.detour:hover {
+  background: #1976D2;
+}
+
+.detour-warning {
+  font-size: 12px;
+  color: #e65100;
+  background: #fff3e0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-top: 6px;
+  font-weight: 500;
+}

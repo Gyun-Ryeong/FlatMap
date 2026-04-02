@@ -9,6 +9,7 @@ public class RouteResponse {
     private int totalDuration;
     private List<RiskSection> riskSections;
     private String overallRisk;
+    private WeatherInfo weather;
 
     public RouteResponse(List<Coord> coords, int totalDistance, int totalDuration) {
         this.coords = coords;
@@ -27,6 +28,8 @@ public class RouteResponse {
         this.overallRisk = calculateOverallRisk(riskSections);
     }
     public String getOverallRisk() { return overallRisk; }
+    public WeatherInfo getWeather() { return weather; }
+    public void setWeather(WeatherInfo weather) { this.weather = weather; }
 
     private static String calculateOverallRisk(List<RiskSection> sections) {
         if (sections == null || sections.isEmpty()) return "SAFE";

@@ -3,7 +3,11 @@ package com.flatmap.navigation.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flatmap.navigation.config.ApiKeyConfig;
+import com.flatmap.navigation.entity.AccidentZone;
+import com.flatmap.navigation.entity.SecurityLight;
 import com.flatmap.navigation.entity.SteepSlopeArea;
+import com.flatmap.navigation.repository.AccidentZoneRepository;
+import com.flatmap.navigation.repository.SecurityLightRepository;
 import com.flatmap.navigation.repository.SteepSlopeAreaRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,13 +26,20 @@ public class GyeonggiDataService {
     private final ApiKeyConfig apiKeyConfig;
     private final ObjectMapper objectMapper;
     private final SteepSlopeAreaRepository steepSlopeAreaRepository;
+    private final SecurityLightRepository securityLightRepository;
+    private final AccidentZoneRepository accidentZoneRepository;
 
     public GyeonggiDataService(RestTemplate restTemplate, ApiKeyConfig apiKeyConfig,
-                                ObjectMapper objectMapper, SteepSlopeAreaRepository steepSlopeAreaRepository) {
+                                ObjectMapper objectMapper,
+                                SteepSlopeAreaRepository steepSlopeAreaRepository,
+                                SecurityLightRepository securityLightRepository,
+                                AccidentZoneRepository accidentZoneRepository) {
         this.restTemplate = restTemplate;
         this.apiKeyConfig = apiKeyConfig;
         this.objectMapper = objectMapper;
         this.steepSlopeAreaRepository = steepSlopeAreaRepository;
+        this.securityLightRepository = securityLightRepository;
+        this.accidentZoneRepository = accidentZoneRepository;
     }
 
     // ============================================================
@@ -229,6 +240,143 @@ public class GyeonggiDataService {
                 "https://openapi.gg.go.kr/SeniorCenter?KEY=%s&Type=json&pIndex=%d&pSize=%d",
                 apiKeyConfig.getGyeonggiSeniorCenterApiKey(), page, size);
         return restTemplate.getForObject(url, String.class);
+    }
+
+    // ============================================================
+    // 보안등 데이터 수집
+    // ============================================================
+
+    public int fetchAndSaveSecurityLights() {
+        log.info("=== 경기데이터드림 보안등 데이터 수집 시작 ===");
+        List<SecurityLight> allLights = new ArrayList<>();
+
+        try {
+            String raw = getSecurityLights(1, 100);
+            if (raw == null || raw.trim().startsWith("<")) {
+                log.error("보안등 API가 JSON이 아닌 응답 반환 (서버 장애 가능)");
+                return 0;
+            }
+            log.info("[DEBUG] 보안등 API 응답: {}", raw.substring(0, Math.min(raw.length(), 500)));
+
+            JsonNode root = objectMapper.readTree(raw);
+            // 경기데이터드림 구조: { "ServiceName": [ {head}, {row} ] }
+            // 실제 서비스명 확인을 위해 모든 키 로깅
+            log.info("[DEBUG] 보안등 응답 키: {}", iterableToString(root.fieldNames()));
+
+            JsonNode rows = findRows(root);
+            if (rows == null) {
+                log.warn("보안등 row 데이터 없음");
+                return 0;
+            }
+
+            if (rows.size() > 0) {
+                log.info("[DEBUG] 보안등 첫 row: {}", rows.get(0));
+            }
+
+            for (JsonNode row : rows) {
+                String name = getFieldValue(row, "INST_NM", "FACLT_NM", "NM", "MANAGE_NM");
+                Double lat = getFieldDouble(row, "REFINE_WGS84_LAT", "LATITUDE", "LAT");
+                Double lng = getFieldDouble(row, "REFINE_WGS84_LOGT", "LONGITUDE", "LNG", "LOT");
+                String addr = getFieldValue(row, "REFINE_ROADNM_ADDR", "REFINE_LOTNO_ADDR", "ADDR");
+                String regionCode = getFieldValue(row, "SIGUN_CD", "REGION_CD");
+
+                if (lat != null && lng != null) {
+                    if (name == null || name.isEmpty()) name = "보안등";
+                    allLights.add(new SecurityLight(name, lat, lng, addr, regionCode));
+                }
+            }
+        } catch (Exception e) {
+            log.error("보안등 데이터 수집 실패: {}", e.getMessage());
+        }
+
+        if (!allLights.isEmpty()) {
+            securityLightRepository.deleteAll();
+            securityLightRepository.saveAll(allLights);
+            log.info("보안등 데이터 {}건 저장 완료", allLights.size());
+        }
+        return allLights.size();
+    }
+
+    // ============================================================
+    // 사고다발지 데이터 수집
+    // ============================================================
+
+    public int fetchAndSaveAccidentZones() {
+        log.info("=== 경기데이터드림 사고다발지 데이터 수집 시작 ===");
+        List<AccidentZone> allZones = new ArrayList<>();
+
+        // 결빙 사고
+        try {
+            String raw = getAccidentIcyZones(1, 100);
+            if (raw != null && !raw.trim().startsWith("<")) {
+                log.info("[DEBUG] 결빙사고 응답 키: {}", iterableToString(objectMapper.readTree(raw).fieldNames()));
+                JsonNode rows = findRows(objectMapper.readTree(raw));
+                if (rows != null) {
+                    if (rows.size() > 0) log.info("[DEBUG] 결빙사고 첫 row: {}", rows.get(0));
+                    for (JsonNode row : rows) {
+                        AccidentZone zone = parseAccidentRow(row, "ICY");
+                        if (zone != null) allZones.add(zone);
+                    }
+                }
+            } else {
+                log.warn("결빙사고 API 응답 없음 또는 HTML 반환");
+            }
+        } catch (Exception e) {
+            log.error("결빙사고 데이터 수집 실패: {}", e.getMessage());
+        }
+
+        // 일반 사고
+        try {
+            String raw = getAccidentNormalZones(1, 100);
+            if (raw != null && !raw.trim().startsWith("<")) {
+                log.info("[DEBUG] 일반사고 응답 키: {}", iterableToString(objectMapper.readTree(raw).fieldNames()));
+                JsonNode rows = findRows(objectMapper.readTree(raw));
+                if (rows != null) {
+                    if (rows.size() > 0) log.info("[DEBUG] 일반사고 첫 row: {}", rows.get(0));
+                    for (JsonNode row : rows) {
+                        AccidentZone zone = parseAccidentRow(row, "NORMAL");
+                        if (zone != null) allZones.add(zone);
+                    }
+                }
+            } else {
+                log.warn("일반사고 API 응답 없음 또는 HTML 반환");
+            }
+        } catch (Exception e) {
+            log.error("일반사고 데이터 수집 실패: {}", e.getMessage());
+        }
+
+        if (!allZones.isEmpty()) {
+            accidentZoneRepository.deleteAll();
+            accidentZoneRepository.saveAll(allZones);
+            log.info("사고다발지 데이터 {}건 저장 완료", allZones.size());
+        }
+        return allZones.size();
+    }
+
+    private AccidentZone parseAccidentRow(JsonNode row, String type) {
+        String name = getFieldValue(row, "SPOT_NM", "ACCDNT_NM", "NM", "ROAD_NM");
+        Double lat = getFieldDouble(row, "REFINE_WGS84_LAT", "LATITUDE", "LAT");
+        Double lng = getFieldDouble(row, "REFINE_WGS84_LOGT", "LONGITUDE", "LNG", "LOT");
+        String regionCode = getFieldValue(row, "SIGUN_CD", "REGION_CD");
+
+        if (lat == null || lng == null) return null;
+        if (name == null || name.isEmpty()) name = "ICY".equals(type) ? "결빙사고 구간" : "사고다발 구간";
+        return new AccidentZone(name, lat, lng, type, regionCode);
+    }
+
+    /** 경기데이터드림 공통: 응답 JSON에서 row 배열을 찾는다. */
+    private JsonNode findRows(JsonNode root) {
+        // 구조: { "ServiceName": [ {head: [...]}, {row: [...]} ] }
+        var fieldNames = root.fieldNames();
+        while (fieldNames.hasNext()) {
+            String key = fieldNames.next();
+            JsonNode service = root.path(key);
+            if (service.isArray() && service.size() > 1) {
+                JsonNode rows = service.get(1).path("row");
+                if (rows.isArray() && !rows.isEmpty()) return rows;
+            }
+        }
+        return null;
     }
 
     // ============================================================

@@ -37,6 +37,12 @@ public class TMapRouteService {
     public RouteResponse getWalkingRoute(double originLng, double originLat,
                                           double destLng, double destLat,
                                           String option) {
+        return getWalkingRoute(originLng, originLat, destLng, destLat, option, null);
+    }
+
+    public RouteResponse getWalkingRoute(double originLng, double originLat,
+                                          double destLng, double destLat,
+                                          String option, String passList) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("appKey", apiKeyConfig.getTmapAppKey());
@@ -57,6 +63,11 @@ public class TMapRouteService {
         body.put("startName", "출발지");
         body.put("endName", "도착지");
         body.put("searchOption", String.valueOf(searchOption));
+
+        if (passList != null && !passList.isEmpty()) {
+            body.put("passList", passList);
+            log.info("T Map 경유지(passList): {}", passList);
+        }
 
         log.info("T Map 보행자 경로 요청: origin=({},{}), dest=({},{}), option={}, searchOption={}",
                 originLat, originLng, destLat, destLng, option, searchOption);

@@ -22,4 +22,6 @@ public interface SteepSlopeAreaRepository extends JpaRepository<SteepSlopeArea, 
     List<SteepSlopeArea> findByRegionCodeStartingWithAndRiskLevel(String regionCodePrefix, String riskLevel);
 
     long countBySource(String source);
+
+    void deleteBySource(String source);
 }

@@ -10,4 +10,5 @@ import java.util.List;
 public interface AccidentZoneRepository extends JpaRepository<AccidentZone, Long> {
     List<AccidentZone> findByType(String type);
     List<AccidentZone> findByRegionCodeStartingWith(String regionCodePrefix);
+    boolean existsByName(String name);
 }

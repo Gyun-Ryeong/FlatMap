@@ -39,13 +39,48 @@ function MapPage() {
   const [mapWeather, setMapWeather] = useState(null);
   const detourPolylinesRef = useRef([]);
   const detourMarkersRef = useRef([]);
-  const [layerMarkers, setLayerMarkers] = useState({ lights: [], accidents: [], cctv: [] });
-  const layerMarkersRef = useRef({ lights: [], accidents: [], cctv: [] });
+  const layerMarkersRef = useRef({ lights: [], accidents: [], cctv: [], protectedZones: [], welfare: [], shelters: [], senior: [] });
+  const activeLayersRef = useRef({ lights: false, accidents: false, cctv: false, protectedZones: false, welfare: false, shelters: false, senior: false });
+  const layerInfoOverlayRef = useRef(null);
+
+  const LAYER_COLORS = {
+    lights: '#FFC107', accidents: '#F44336', cctv: '#757575',
+    protectedZones: '#4CAF50', welfare: '#2196F3', shelters: '#FF9800', senior: '#9C27B0',
+  };
+
+  const getMaxMarkersByZoom = useCallback(() => {
+    if (!mapInstanceRef.current) return 50;
+    const level = mapInstanceRef.current.getLevel();
+    // 카카오맵 레벨: 1(가장 확대) ~ 14(가장 축소)
+    if (level <= 3) return 200;
+    if (level <= 5) return 100;
+    if (level <= 6) return 50;
+    if (level <= 7) return 20;
+    return 0; // 레벨 8 이상(축소)이면 마커 숨김
+  }, []);
+
+  const updateLayerMarkersForZoom = useCallback(() => {
+    if (!mapInstanceRef.current || !window.kakao?.maps) return;
+    const maxMarkers = getMaxMarkersByZoom();
+
+    Object.keys(activeLayersRef.current).forEach((type) => {
+      if (!activeLayersRef.current[type]) return;
+      const markers = layerMarkersRef.current[type] || [];
+      markers.forEach((m, i) => {
+        if (i < maxMarkers) {
+          m.setMap(mapInstanceRef.current);
+        } else {
+          m.setMap(null);
+        }
+      });
+    });
+  }, [getMaxMarkersByZoom]);
 
   const clearLayerMarkers = useCallback((type) => {
     if (!layerMarkersRef.current[type]) return;
     layerMarkersRef.current[type].forEach((m) => m.setMap(null));
     layerMarkersRef.current[type] = [];
+    activeLayersRef.current[type] = false;
   }, []);
 
   const showLayerMarkers = useCallback((type, items, emoji) => {
@@ -53,25 +88,75 @@ function MapPage() {
     const kakao = window.kakao;
     clearLayerMarkers(type);
 
-    const newMarkers = items.slice(0, 100).map((item) => {
+    console.log(`[${type}] API 응답 건수:`, items.length);
+
+    activeLayersRef.current[type] = true;
+    const maxMarkers = getMaxMarkersByZoom();
+    const bgColor = LAYER_COLORS[type] || '#666';
+
+    const newMarkers = items.map((item) => {
       if (!item.latitude || !item.longitude) return null;
-      const content = document.createElement('div');
-      content.className = 'layer-marker';
-      content.textContent = emoji;
-      content.title = item.name || '';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'layer-marker-wrap';
+
+      const circle = document.createElement('div');
+      circle.className = 'layer-marker-circle';
+      circle.style.background = bgColor;
+      circle.textContent = emoji;
+      wrap.appendChild(circle);
+
+      // 클릭 시 InfoWindow
+      wrap.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (layerInfoOverlayRef.current) {
+          layerInfoOverlayRef.current.setMap(null);
+          layerInfoOverlayRef.current = null;
+        }
+        const infoEl = document.createElement('div');
+        infoEl.className = 'layer-info-window';
+        infoEl.innerHTML = `
+          <div class="layer-info-header">
+            <span>${emoji} ${item.name || '정보 없음'}</span>
+            <button class="layer-info-close">&times;</button>
+          </div>
+          <div class="layer-info-body">
+            ${item.address ? `<p>${item.address}</p>` : ''}
+            ${item.phone ? `<p>📞 ${item.phone}</p>` : ''}
+            ${item.type ? `<p>유형: ${item.type}</p>` : ''}
+          </div>`;
+        const infoOverlay = new kakao.maps.CustomOverlay({
+          position: new kakao.maps.LatLng(item.latitude, item.longitude),
+          content: infoEl,
+          map: mapInstanceRef.current,
+          yAnchor: 1.4,
+          zIndex: 300,
+        });
+        layerInfoOverlayRef.current = infoOverlay;
+        infoEl.querySelector('.layer-info-close').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          infoOverlay.setMap(null);
+          layerInfoOverlayRef.current = null;
+        });
+      });
 
       const overlay = new kakao.maps.CustomOverlay({
         position: new kakao.maps.LatLng(item.latitude, item.longitude),
-        content,
-        map: mapInstanceRef.current,
+        content: wrap,
         yAnchor: 0.5,
         zIndex: 80,
       });
       return overlay;
     }).filter(Boolean);
 
+    console.log(`[${type}] 마커 생성:`, newMarkers.length, '건, 줌 제한:', maxMarkers);
+
+    newMarkers.forEach((m, i) => {
+      if (i < maxMarkers) m.setMap(mapInstanceRef.current);
+    });
+
     layerMarkersRef.current[type] = newMarkers;
-  }, [clearLayerMarkers]);
+  }, [clearLayerMarkers, getMaxMarkersByZoom]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,12 +170,17 @@ function MapPage() {
       setKakaoReady(true);
       console.log('카카오맵 초기화 완료');
 
+      // 줌 변경 시 레이어 마커 표시 수 조정
+      kakao.maps.event.addListener(mapInstanceRef.current, 'zoom_changed', () => {
+        updateLayerMarkersForZoom();
+      });
+
       // 현재 위치 가져오기
       requestCurrentLocation(kakao);
     });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [updateLayerMarkersForZoom]);
 
   const showMyLocationMarker = useCallback((kakao, lat, lng) => {
     if (myLocationOverlayRef.current) {
@@ -753,6 +843,8 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
         weather: data.weather || null,
       });
 
+      console.log('위험구간 데이터:', data.riskSections);
+
       if (data.coords && data.coords.length > 0) {
         onRouteFound(data.coords, data.riskSections || []);
       }
@@ -1129,8 +1221,14 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(true);
   const [riskStats, setRiskStats] = useState({ high: 0, medium: 0, low: 0 });
-  const [layers, setLayers] = useState({ lights: false, accidents: false, cctv: false });
-  const [layerData, setLayerData] = useState({ lights: [], accidents: [], cctv: [] });
+  const [layers, setLayers] = useState({
+    lights: false, accidents: false, cctv: false,
+    protectedZones: false, welfare: false, shelters: false, senior: false,
+  });
+  const [layerData, setLayerData] = useState({
+    lights: [], accidents: [], cctv: [],
+    protectedZones: [], welfare: [], shelters: [], senior: [],
+  });
 
   // 날씨 + 통계 로드
   useEffect(() => {
@@ -1162,6 +1260,17 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
       .catch(() => {});
   }, []);
 
+  // 레이어 설정
+  const LAYER_CONFIG = [
+    { key: 'lights', label: '보안등', emoji: '\uD83D\uDCA1', endpoint: '/safety/security-lights' },
+    { key: 'accidents', label: '사고다발지', emoji: '\u26A0\uFE0F', endpoint: '/safety/accident-zones' },
+    { key: 'cctv', label: 'CCTV', emoji: '\uD83D\uDCF9', endpoint: '/safety/cctv' },
+    { key: 'protectedZones', label: '교통약자 보호구역', emoji: '\uD83D\uDEB8', endpoint: '/safety/protected-zones' },
+    { key: 'welfare', label: '장애인복지시설', emoji: '\u267F', endpoint: '/safety/welfare-facilities' },
+    { key: 'shelters', label: '그늘막', emoji: '\u26F1\uFE0F', endpoint: '/safety/shade-shelters' },
+    { key: 'senior', label: '노인복지관', emoji: '\uD83C\uDFE0', endpoint: '/safety/senior-centers' },
+  ];
+
   // 레이어 토글 핸들러
   const handleToggle = async (type) => {
     const newState = !layers[type];
@@ -1173,28 +1282,29 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
     }
 
     // 데이터가 이미 있으면 재사용
-    if (layerData[type].length > 0) {
-      const emoji = type === 'lights' ? '\uD83D\uDCA1' : type === 'accidents' ? '\u26A0\uFE0F' : '\uD83D\uDCF9';
-      onToggleLayer(type, layerData[type], emoji);
+    if (layerData[type] && layerData[type].length > 0) {
+      const config = LAYER_CONFIG.find((c) => c.key === type);
+      onToggleLayer(type, layerData[type], config ? config.emoji : '');
       return;
     }
 
     // 데이터 fetch
-    const endpoints = {
-      lights: '/safety/security-lights',
-      accidents: '/safety/accident-zones',
-      cctv: '/safety/cctv',
-    };
+    const config = LAYER_CONFIG.find((c) => c.key === type);
+    if (!config) return;
+
     try {
-      const res = await fetch(`${API_BASE}${endpoints[type]}`);
+      console.log(`[${type}] API 호출: ${API_BASE}${config.endpoint}`);
+      const res = await fetch(`${API_BASE}${config.endpoint}`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`[${type}] API 응답:`, data.length, '건', data.slice(0, 2));
         setLayerData((prev) => ({ ...prev, [type]: data }));
-        const emojis = { lights: '\uD83D\uDCA1', accidents: '\u26A0\uFE0F', cctv: '\uD83D\uDCF9' };
-        onToggleLayer(type, data, emojis[type]);
+        onToggleLayer(type, data, config.emoji);
+      } else {
+        console.error(`[${type}] API 오류: HTTP ${res.status}`);
       }
     } catch (err) {
-      console.error(`${type} 데이터 로드 실패:`, err);
+      console.error(`[${type}] 데이터 로드 실패:`, err);
     }
   };
 
@@ -1266,30 +1376,17 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
       <div className="layer-toggles">
         <p className="option-label">지도 레이어</p>
         <div className="layer-toggle-list">
-          <button
-            className={`layer-toggle-btn${layers.lights ? ' active' : ''}`}
-            onClick={() => handleToggle('lights')}
-          >
-            <span className="layer-toggle-icon">{'\uD83D\uDCA1'}</span>
-            <span>보안등</span>
-            <span className={`layer-toggle-badge${layers.lights ? ' on' : ''}`}>{layers.lights ? 'ON' : 'OFF'}</span>
-          </button>
-          <button
-            className={`layer-toggle-btn${layers.accidents ? ' active' : ''}`}
-            onClick={() => handleToggle('accidents')}
-          >
-            <span className="layer-toggle-icon">{'\u26A0\uFE0F'}</span>
-            <span>사고다발지</span>
-            <span className={`layer-toggle-badge${layers.accidents ? ' on' : ''}`}>{layers.accidents ? 'ON' : 'OFF'}</span>
-          </button>
-          <button
-            className={`layer-toggle-btn${layers.cctv ? ' active' : ''}`}
-            onClick={() => handleToggle('cctv')}
-          >
-            <span className="layer-toggle-icon">{'\uD83D\uDCF9'}</span>
-            <span>CCTV</span>
-            <span className={`layer-toggle-badge${layers.cctv ? ' on' : ''}`}>{layers.cctv ? 'ON' : 'OFF'}</span>
-          </button>
+          {LAYER_CONFIG.map(({ key, label, emoji }) => (
+            <button
+              key={key}
+              className={`layer-toggle-btn${layers[key] ? ' active' : ''}`}
+              onClick={() => handleToggle(key)}
+            >
+              <span className="layer-toggle-icon">{emoji}</span>
+              <span>{label}</span>
+              <span className={`layer-toggle-badge${layers[key] ? ' on' : ''}`}>{layers[key] ? 'ON' : 'OFF'}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>

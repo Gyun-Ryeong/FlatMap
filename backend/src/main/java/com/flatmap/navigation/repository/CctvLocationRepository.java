@@ -6,4 +6,5 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface CctvLocationRepository extends JpaRepository<CctvLocation, Long> {
+    boolean existsByName(String name);
 }

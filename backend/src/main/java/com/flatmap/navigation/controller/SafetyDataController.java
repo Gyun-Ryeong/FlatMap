@@ -54,14 +54,10 @@ public class SafetyDataController {
     @GetMapping("/security-lights")
     public ResponseEntity<List<SecurityLight>> getSecurityLights(
             @RequestParam(required = false) String regionCode) {
-        List<SecurityLight> result;
         if (regionCode != null && !regionCode.isEmpty()) {
-            result = securityLightRepository.findByRegionCodeStartingWith(regionCode);
-        } else {
-            result = securityLightRepository.findAll();
+            return ResponseEntity.ok(securityLightRepository.findByRegionCodeStartingWith(regionCode));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(securityLightRepository.findAll());
     }
 
     // ========== 사고다발지 ==========
@@ -69,23 +65,17 @@ public class SafetyDataController {
     @GetMapping("/accident-zones")
     public ResponseEntity<List<AccidentZone>> getAccidentZones(
             @RequestParam(required = false) String type) {
-        List<AccidentZone> result;
         if (type != null && !type.isEmpty()) {
-            result = accidentZoneRepository.findByType(type.toUpperCase());
-        } else {
-            result = accidentZoneRepository.findAll();
+            return ResponseEntity.ok(accidentZoneRepository.findByType(type.toUpperCase()));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(accidentZoneRepository.findAll());
     }
 
     // ========== CCTV ==========
 
     @GetMapping("/cctv")
     public ResponseEntity<List<CctvLocation>> getCctvLocations() {
-        List<CctvLocation> result = cctvLocationRepository.findAll();
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(cctvLocationRepository.findAll());
     }
 
     // ========== 교통약자 보호구역 ==========
@@ -93,14 +83,10 @@ public class SafetyDataController {
     @GetMapping("/protected-zones")
     public ResponseEntity<List<ProtectedZone>> getProtectedZones(
             @RequestParam(required = false) String regionCode) {
-        List<ProtectedZone> result;
         if (regionCode != null && !regionCode.isEmpty()) {
-            result = protectedZoneRepository.findByRegionCodeStartingWith(regionCode);
-        } else {
-            result = protectedZoneRepository.findAll();
+            return ResponseEntity.ok(protectedZoneRepository.findByRegionCodeStartingWith(regionCode));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(protectedZoneRepository.findAll());
     }
 
     // ========== 장애인복지시설 ==========
@@ -108,14 +94,10 @@ public class SafetyDataController {
     @GetMapping("/welfare-facilities")
     public ResponseEntity<List<WelfareFacility>> getWelfareFacilities(
             @RequestParam(required = false) String regionCode) {
-        List<WelfareFacility> result;
         if (regionCode != null && !regionCode.isEmpty()) {
-            result = welfareFacilityRepository.findByRegionCodeStartingWith(regionCode);
-        } else {
-            result = welfareFacilityRepository.findAll();
+            return ResponseEntity.ok(welfareFacilityRepository.findByRegionCodeStartingWith(regionCode));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(welfareFacilityRepository.findAll());
     }
 
     // ========== 그늘막 ==========
@@ -123,14 +105,10 @@ public class SafetyDataController {
     @GetMapping("/shade-shelters")
     public ResponseEntity<List<ShadeShelter>> getShadeShelters(
             @RequestParam(required = false) String regionCode) {
-        List<ShadeShelter> result;
         if (regionCode != null && !regionCode.isEmpty()) {
-            result = shadeShelterRepository.findByRegionCodeStartingWith(regionCode);
-        } else {
-            result = shadeShelterRepository.findAll();
+            return ResponseEntity.ok(shadeShelterRepository.findByRegionCodeStartingWith(regionCode));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(shadeShelterRepository.findAll());
     }
 
     // ========== 노인복지관 ==========
@@ -138,14 +116,10 @@ public class SafetyDataController {
     @GetMapping("/senior-centers")
     public ResponseEntity<List<SeniorCenter>> getSeniorCenters(
             @RequestParam(required = false) String regionCode) {
-        List<SeniorCenter> result;
         if (regionCode != null && !regionCode.isEmpty()) {
-            result = seniorCenterRepository.findByRegionCodeStartingWith(regionCode);
-        } else {
-            result = seniorCenterRepository.findAll();
+            return ResponseEntity.ok(seniorCenterRepository.findByRegionCodeStartingWith(regionCode));
         }
-        if (result.size() > 200) result = result.subList(0, 200);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(seniorCenterRepository.findAll());
     }
 
     // ========== 통계 ==========
@@ -227,12 +201,12 @@ public class SafetyDataController {
 
     @PostMapping("/fetch/senior-centers")
     public ResponseEntity<Map<String, Object>> fetchSeniorCenters() {
-        log.info("노인복지관 데이터 수집 시작");
+        log.info("노인복지관+경로당 데이터 수집 시작");
         try {
-            int saved = publicDataService.fetchAndSaveSeniorCenters();
-            return ResponseEntity.ok(Map.of("savedCount", saved, "message", "노인복지관 데이터 수집 완료"));
+            int saved = gyeonggiDataService.fetchAndSaveSeniorCenters();
+            return ResponseEntity.ok(Map.of("savedCount", saved, "message", "노인복지관+경로당 데이터 수집 완료"));
         } catch (Exception e) {
-            log.error("노인복지관 수집 실패: {}", e.getMessage(), e);
+            log.error("노인복지관+경로당 수집 실패: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
@@ -261,7 +235,7 @@ public class SafetyDataController {
         result.put("protectedZones", safeFetch("교통약자보호구역", () -> publicDataService.fetchAndSaveProtectedZones(), errors));
         result.put("welfareFacilities", safeFetch("장애인복지시설", () -> publicDataService.fetchAndSaveWelfareFacilities(), errors));
         result.put("shadeShelters", safeFetch("그늘막", () -> publicDataService.fetchAndSaveShadeShelters(), errors));
-        result.put("seniorCenters", safeFetch("노인복지관", () -> publicDataService.fetchAndSaveSeniorCenters(), errors));
+        result.put("seniorCenters", safeFetch("노인복지관+경로당", () -> gyeonggiDataService.fetchAndSaveSeniorCenters(), errors));
         result.put("cctv", safeFetch("CCTV", () -> publicDataService.fetchAndSaveCctvLocations(), errors));
 
         if (errors.length() > 0) result.put("errors", errors.toString());

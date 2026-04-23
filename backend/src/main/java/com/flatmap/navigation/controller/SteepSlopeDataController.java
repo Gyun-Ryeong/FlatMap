@@ -2,6 +2,7 @@ package com.flatmap.navigation.controller;
 
 import com.flatmap.navigation.entity.SteepSlopeArea;
 import com.flatmap.navigation.repository.SteepSlopeAreaRepository;
+import com.flatmap.navigation.service.CsvImportService;
 import com.flatmap.navigation.service.DisasterDataService;
 import com.flatmap.navigation.service.GyeonggiDataService;
 import com.flatmap.navigation.service.PublicDataService;
@@ -25,15 +26,18 @@ public class SteepSlopeDataController {
     private final GyeonggiDataService gyeonggiDataService;
     private final DisasterDataService disasterDataService;
     private final PublicDataService publicDataService;
+    private final CsvImportService csvImportService;
     private final SteepSlopeAreaRepository repository;
 
     public SteepSlopeDataController(GyeonggiDataService gyeonggiDataService,
                                      DisasterDataService disasterDataService,
                                      PublicDataService publicDataService,
+                                     CsvImportService csvImportService,
                                      SteepSlopeAreaRepository repository) {
         this.gyeonggiDataService = gyeonggiDataService;
         this.disasterDataService = disasterDataService;
         this.publicDataService = publicDataService;
+        this.csvImportService = csvImportService;
         this.repository = repository;
     }
 
@@ -191,21 +195,10 @@ public class SteepSlopeDataController {
         return ResponseEntity.ok(stats);
     }
 
-    /** 위험도별 통계 (SafetyPanel용) — 성남시 데이터만 카운트 */
+    /** 위험도별 통계 (SafetyPanel용) — 성남시 데이터만 카운트 (regionCode LIKE '411%') */
     @GetMapping("/risk-stats")
     public ResponseEntity<Map<String, Object>> getRiskStats() {
-        // 성남시 행정코드: 41130, 41131, 41133, 41135
-        List<SteepSlopeArea> seongnam = new ArrayList<>();
-        for (String prefix : List.of("41130", "41131", "41133", "41135")) {
-            seongnam.addAll(repository.findByRegionCodeStartingWith(prefix));
-        }
-        // regionCode가 null인 데이터 중 DUMMY가 아닌 것도 포함 (내리막 사고 등)
-        List<SteepSlopeArea> all = repository.findAll();
-        for (SteepSlopeArea a : all) {
-            if (a.getRegionCode() == null && !"DUMMY".equals(a.getSource())) {
-                seongnam.add(a);
-            }
-        }
+        List<SteepSlopeArea> seongnam = repository.findByRegionCodeStartingWith("411");
 
         long high = seongnam.stream().filter(a -> "HIGH".equals(a.getRiskLevel()) || "VERY_HIGH".equals(a.getRiskLevel())).count();
         long medium = seongnam.stream().filter(a -> "MEDIUM".equals(a.getRiskLevel())).count();
@@ -253,6 +246,22 @@ public class SteepSlopeDataController {
                 "insertedCount", seedData.size(),
                 "totalInDb", repository.count()
         ));
+    }
+
+    /** 행정안전부 CSV 성남시 급경사지 임포트 */
+    @PostMapping("/import/csv")
+    public ResponseEntity<Map<String, Object>> importFromCsv() {
+        log.info("행정안전부 CSV 임포트 요청");
+        try {
+            Map<String, Integer> result = csvImportService.importSeongnamFromCsv();
+            Map<String, Object> response = new java.util.HashMap<>(result);
+            response.put("totalInDb", repository.count());
+            response.put("message", "행정안전부 CSV 임포트 완료");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("CSV 임포트 실패: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /** 테스트용 더미 데이터 삽입 (성남시 수정구/중원구/분당구) */

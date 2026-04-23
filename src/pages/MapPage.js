@@ -28,7 +28,11 @@ function MapPage() {
   const mapInstanceRef = useRef(null);
   const polylinesRef = useRef([]);
   const markersRef = useRef([]);
-  const overlaysRef = useRef([]);
+  const riskSectionsRef = useRef([]);         // 원래 경로 riskSections 데이터
+  const detourRiskSectionsRef = useRef([]);   // 우회 경로 riskSections 데이터
+  const [visibleRiskMarkers, setVisibleRiskMarkers] = useState([]); // "!" 마커 React state
+  const [mapTick, setMapTick] = useState(0);   // 지도 이동/줌 시 re-render 트리거
+  const [riskInfoWindow, setRiskInfoWindow] = useState(null); // 클릭한 "!" 마커 InfoWindow
   const myLocationOverlayRef = useRef(null);
   const myLocationRef = useRef(null);
   const [activeTab, setActiveTab] = useState('route');
@@ -39,24 +43,26 @@ function MapPage() {
   const [mapWeather, setMapWeather] = useState(null);
   const detourPolylinesRef = useRef([]);
   const detourMarkersRef = useRef([]);
-  const layerMarkersRef = useRef({ lights: [], accidents: [], cctv: [], protectedZones: [], welfare: [], shelters: [], senior: [] });
-  const activeLayersRef = useRef({ lights: false, accidents: false, cctv: false, protectedZones: false, welfare: false, shelters: false, senior: false });
+  const layerMarkersRef = useRef({ accidents: [], cctv: [], protectedZones: [], welfare: [], shelters: [], senior: [] });
+  const activeLayersRef = useRef({ accidents: false, cctv: false, protectedZones: false, welfare: false, shelters: false, senior: false });
   const layerInfoOverlayRef = useRef(null);
 
   const LAYER_COLORS = {
-    lights: '#FFC107', accidents: '#F44336', cctv: '#757575',
+    accidents: '#F44336', cctv: '#757575',
     protectedZones: '#4CAF50', welfare: '#2196F3', shelters: '#FF9800', senior: '#9C27B0',
   };
 
+  const cctvClustererRef = useRef(null);
+
   const getMaxMarkersByZoom = useCallback(() => {
-    if (!mapInstanceRef.current) return 50;
+    if (!mapInstanceRef.current) return 200;
     const level = mapInstanceRef.current.getLevel();
     // 카카오맵 레벨: 1(가장 확대) ~ 14(가장 축소)
-    if (level <= 3) return 200;
-    if (level <= 5) return 100;
-    if (level <= 6) return 50;
-    if (level <= 7) return 20;
-    return 0; // 레벨 8 이상(축소)이면 마커 숨김
+    if (level <= 3) return Infinity;
+    if (level <= 5) return 500;
+    if (level <= 6) return 300;
+    if (level <= 7) return 100;
+    return 30;
   }, []);
 
   const updateLayerMarkersForZoom = useCallback(() => {
@@ -65,6 +71,7 @@ function MapPage() {
 
     Object.keys(activeLayersRef.current).forEach((type) => {
       if (!activeLayersRef.current[type]) return;
+      if (type === 'cctv') return; // clusterer가 줌 변경 자동 처리
       const markers = layerMarkersRef.current[type] || [];
       markers.forEach((m, i) => {
         if (i < maxMarkers) {
@@ -77,6 +84,10 @@ function MapPage() {
   }, [getMaxMarkersByZoom]);
 
   const clearLayerMarkers = useCallback((type) => {
+    if (type === 'cctv' && cctvClustererRef.current) {
+      cctvClustererRef.current.clear();
+      cctvClustererRef.current = null;
+    }
     if (!layerMarkersRef.current[type]) return;
     layerMarkersRef.current[type].forEach((m) => m.setMap(null));
     layerMarkersRef.current[type] = [];
@@ -89,10 +100,74 @@ function MapPage() {
     clearLayerMarkers(type);
 
     console.log(`[${type}] API 응답 건수:`, items.length);
-
     activeLayersRef.current[type] = true;
-    const maxMarkers = getMaxMarkersByZoom();
+
+    // CCTV — MarkerClusterer 적용
+    if (type === 'cctv') {
+      const kakaoMarkers = items
+        .filter((item) => item.latitude && item.longitude)
+        .map((item) => {
+          const marker = new kakao.maps.Marker({
+            position: new kakao.maps.LatLng(item.latitude, item.longitude),
+          });
+          kakao.maps.event.addListener(marker, 'click', () => {
+            if (layerInfoOverlayRef.current) {
+              layerInfoOverlayRef.current.setMap(null);
+              layerInfoOverlayRef.current = null;
+            }
+            const infoEl = document.createElement('div');
+            infoEl.className = 'layer-info-window';
+            infoEl.innerHTML = `
+              <div class="layer-info-header">
+                <span>📹 ${item.name || 'CCTV'}</span>
+                <button class="layer-info-close">&times;</button>
+              </div>
+              <div class="layer-info-body">
+                ${item.address ? `<p>${item.address}</p>` : ''}
+              </div>`;
+            const infoOverlay = new kakao.maps.CustomOverlay({
+              position: new kakao.maps.LatLng(item.latitude, item.longitude),
+              content: infoEl,
+              map: mapInstanceRef.current,
+              yAnchor: 1.4,
+              zIndex: 300,
+            });
+            layerInfoOverlayRef.current = infoOverlay;
+            infoEl.querySelector('.layer-info-close').addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              infoOverlay.setMap(null);
+              layerInfoOverlayRef.current = null;
+            });
+          });
+          return marker;
+        });
+
+      const clusterer = new kakao.maps.MarkerClusterer({
+        map: mapInstanceRef.current,
+        averageCenter: true,
+        minLevel: 5,
+        disableClickZoom: false,
+        styles: [{
+          width: '40px', height: '40px',
+          background: 'rgba(117,117,117,0.85)',
+          borderRadius: '50%',
+          color: '#fff',
+          textAlign: 'center',
+          lineHeight: '40px',
+          fontSize: '13px',
+          fontWeight: 'bold',
+        }],
+      });
+      clusterer.addMarkers(kakaoMarkers);
+      cctvClustererRef.current = clusterer;
+      layerMarkersRef.current[type] = kakaoMarkers;
+      console.log(`[cctv] MarkerClusterer 적용: ${kakaoMarkers.length}건`);
+      return;
+    }
+
+    // 일반 레이어 — CustomOverlay
     const bgColor = LAYER_COLORS[type] || '#666';
+    const maxMarkers = getMaxMarkersByZoom();
 
     const newMarkers = items.map((item) => {
       if (!item.latitude || !item.longitude) return null;
@@ -106,7 +181,6 @@ function MapPage() {
       circle.textContent = emoji;
       wrap.appendChild(circle);
 
-      // 클릭 시 InfoWindow
       wrap.addEventListener('click', (e) => {
         e.stopPropagation();
         if (layerInfoOverlayRef.current) {
@@ -149,7 +223,7 @@ function MapPage() {
       return overlay;
     }).filter(Boolean);
 
-    console.log(`[${type}] 마커 생성:`, newMarkers.length, '건, 줌 제한:', maxMarkers);
+    console.log(`[${type}] 마커 생성: ${newMarkers.length}건, 줌 제한: ${maxMarkers === Infinity ? '없음' : maxMarkers}`);
 
     newMarkers.forEach((m, i) => {
       if (i < maxMarkers) m.setMap(mapInstanceRef.current);
@@ -170,9 +244,13 @@ function MapPage() {
       setKakaoReady(true);
       console.log('카카오맵 초기화 완료');
 
-      // 줌 변경 시 레이어 마커 표시 수 조정
+      // 줌 변경 / 드래그 시 레이어 마커 + React "!" 마커 위치 갱신
       kakao.maps.event.addListener(mapInstanceRef.current, 'zoom_changed', () => {
         updateLayerMarkersForZoom();
+        setMapTick((t) => t + 1);
+      });
+      kakao.maps.event.addListener(mapInstanceRef.current, 'dragend', () => {
+        setMapTick((t) => t + 1);
       });
 
       // 현재 위치 가져오기
@@ -283,6 +361,7 @@ function MapPage() {
     detourPolylinesRef.current = [];
     detourMarkersRef.current.forEach((m) => m.setMap(null));
     detourMarkersRef.current = [];
+    detourRiskSectionsRef.current = [];
   }, []);
 
   const clearRoute = useCallback(() => {
@@ -290,10 +369,25 @@ function MapPage() {
     polylinesRef.current = [];
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
-    overlaysRef.current.forEach((o) => o.setMap(null));
-    overlaysRef.current = [];
+    riskSectionsRef.current = [];
+    setVisibleRiskMarkers([]);
+    setRiskInfoWindow(null);
     clearDetour();
   }, [clearDetour]);
+
+  // "!" 마커를 React state로 설정 (CustomOverlay 불사용)
+  const createRiskMarkers = useCallback((sections, prefix) => {
+    console.log('[createRiskMarkers] sections:', sections?.length, 'prefix:', prefix);
+    setVisibleRiskMarkers(sections.map((rs) => ({
+      lat: rs.lat,
+      lng: rs.lng,
+      riskLevel: rs.riskLevel,
+      name: rs.name,
+      grade: rs.grade,
+      distanceFromRoute: rs.distanceFromRoute,
+    })));
+    setRiskInfoWindow(null);
+  }, []);
 
   const drawRoute = useCallback((coords, riskSections = []) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -391,63 +485,6 @@ function MapPage() {
         }
       }
 
-      // 위험구간 경고 오버레이
-      riskSections.forEach((rs) => {
-        const pos = new kakao.maps.LatLng(rs.lat, rs.lng);
-        const levelLabel = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? '위험'
-          : rs.riskLevel === 'MEDIUM' ? '주의' : '양호';
-        const levelClass = rs.riskLevel === 'VERY_HIGH' || rs.riskLevel === 'HIGH' ? 'high'
-          : rs.riskLevel === 'MEDIUM' ? 'medium' : 'low';
-
-        const content = document.createElement('div');
-        content.className = 'risk-overlay-marker';
-        content.innerHTML = `<div class="risk-overlay-icon ${levelClass}">!</div>`;
-
-        const overlay = new kakao.maps.CustomOverlay({
-          position: pos,
-          content,
-          map: mapInstanceRef.current,
-          yAnchor: 1.3,
-          zIndex: 200,
-        });
-        overlaysRef.current.push(overlay);
-
-        // 클릭 시 InfoWindow
-        content.addEventListener('click', () => {
-          // 기존 열린 InfoWindow 닫기
-          overlaysRef.current
-            .filter((o) => o._infoOverlay)
-            .forEach((o) => { o._infoOverlay.setMap(null); delete o._infoOverlay; });
-
-          const infoContent = document.createElement('div');
-          infoContent.className = 'risk-info-window';
-          infoContent.innerHTML = `
-            <div class="risk-info-header">
-              <span class="risk-info-name">${rs.name || '위험구간'}</span>
-              <button class="risk-info-close">&times;</button>
-            </div>
-            <div class="risk-info-body">
-              <div class="risk-info-row"><span>경사도</span><strong>${rs.grade ? rs.grade.toFixed(1) + '%' : '정보없음'}</strong></div>
-              <div class="risk-info-row"><span>위험등급</span><span class="risk-badge ${levelClass}">${levelLabel}</span></div>
-              <div class="risk-info-row"><span>경로 이격</span><strong>${rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(1) + 'm' : '-'}</strong></div>
-            </div>`;
-
-          const infoOverlay = new kakao.maps.CustomOverlay({
-            position: pos,
-            content: infoContent,
-            map: mapInstanceRef.current,
-            yAnchor: 1.8,
-            zIndex: 300,
-          });
-          overlay._infoOverlay = infoOverlay;
-          overlaysRef.current.push(infoOverlay);
-
-          infoContent.querySelector('.risk-info-close').addEventListener('click', (e) => {
-            e.stopPropagation();
-            infoOverlay.setMap(null);
-          });
-        });
-      });
     }
 
     // 출발/도착 마커
@@ -470,8 +507,12 @@ function MapPage() {
     path.forEach((p) => bounds.extend(p));
     mapInstanceRef.current.setBounds(bounds);
 
+    // drawRoute 완료 후 "!" 마커 즉시 생성
+    riskSectionsRef.current = riskSections;
+    createRiskMarkers(riskSections, 'risk-overlay');
+
     console.log('경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
-  }, [clearRoute]);
+  }, [clearRoute, createRiskMarkers]);
 
   const setRouteOpacity = useCallback((opacity) => {
     polylinesRef.current.forEach((p) => p.setOptions({ strokeOpacity: opacity }));
@@ -562,6 +603,11 @@ function MapPage() {
       mapInstanceRef.current.setBounds(bounds);
     }
 
+    // 우회 경로 riskSections 저장, drawRoute에서 표시한 "!" 마커 초기화
+    detourRiskSectionsRef.current = riskSections;
+    setVisibleRiskMarkers([]);  // 원래 경로 마커 제거 (selectRoute에서 재생성)
+    setRiskInfoWindow(null);
+
     console.log('우회 경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
   }, [clearDetour, setRouteOpacity]);
 
@@ -569,24 +615,33 @@ function MapPage() {
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    // InfoWindow 닫기
+    setRiskInfoWindow(null);
+
     if (type === 'original') {
-      // 원래 경로 표시
+      console.log('[selectRoute] original - riskSectionsRef:', riskSectionsRef.current?.length);
+      // 원래 경로 폴리라인 + 출발/도착 마커 표시
       polylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.8 }); });
-      overlaysRef.current.forEach((o) => o.setMap(map));
       markersRef.current.forEach((m) => m.setMap(map));
-      // 우회 경로 숨기기
+      // 우회 경로 숨김
       detourPolylinesRef.current.forEach((p) => p.setMap(null));
       detourMarkersRef.current.forEach((m) => m.setMap(null));
+      // 원래 경로 "!" 마커 새로 생성
+      console.log('[selectRoute] original - setVisibleRiskMarkers 호출');
+      createRiskMarkers(riskSectionsRef.current, 'risk-overlay');
     } else {
-      // 원래 경로 숨기기
+      console.log('[selectRoute] detour - detourRiskSectionsRef:', detourRiskSectionsRef.current?.length);
+      // 원래 경로 폴리라인 숨김
       polylinesRef.current.forEach((p) => p.setMap(null));
-      overlaysRef.current.forEach((o) => o.setMap(null));
-      // 우회 경로 표시
+      // 우회 경로 폴리라인 + 출발/도착 마커 표시
       detourPolylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.9 }); });
       detourMarkersRef.current.forEach((m) => m.setMap(map));
       markersRef.current.forEach((m) => m.setMap(map));
+      // 우회 경로 "!" 마커 새로 생성
+      console.log('[selectRoute] detour - setVisibleRiskMarkers 호출');
+      createRiskMarkers(detourRiskSectionsRef.current, 'detour-overlay');
     }
-  }, []);
+  }, [createRiskMarkers]);
 
   const moveToLocation = useCallback((lat, lng, name) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -622,8 +677,61 @@ function MapPage() {
 
   return (
     <div className="map-layout">
-      {/* 지도 */}
       <div ref={mapRef} className="map-container" />
+
+      {/* React state로 관리하는 "!" 위험 마커 — map-layout 기준 absolute */}
+      {mapInstanceRef.current && window.kakao?.maps && visibleRiskMarkers.map((marker) => {
+        try {
+          const proj = mapInstanceRef.current.getProjection();
+          const pt = proj.containerPointFromCoords(
+            new window.kakao.maps.LatLng(marker.lat, marker.lng)
+          );
+          const key = `${marker.lat}-${marker.lng}`;
+          const levelClass = marker.riskLevel === 'VERY_HIGH' || marker.riskLevel === 'HIGH' ? 'high'
+            : marker.riskLevel === 'MEDIUM' ? 'medium' : 'low';
+          console.log('DOM risk markers:', document.querySelectorAll('.risk-overlay-marker').length, 'state:', visibleRiskMarkers.length);
+          return (
+            <div
+              key={key}
+              className="risk-overlay-marker"
+              style={{ position: 'absolute', left: pt.x, top: pt.y, transform: 'translate(-50%, -130%)', zIndex: 200, cursor: 'pointer', pointerEvents: 'auto' }}
+              onClick={(e) => { e.stopPropagation(); setRiskInfoWindow(riskInfoWindow?.key === key ? null : { ...marker, key }); }}
+            >
+              <div className={`risk-overlay-icon ${levelClass}`}>!</div>
+            </div>
+          );
+        } catch (_) { return null; }
+      })}
+
+      {/* 클릭한 "!" 마커 InfoWindow */}
+      {riskInfoWindow && mapInstanceRef.current && window.kakao?.maps && (() => {
+        try {
+          const proj = mapInstanceRef.current.getProjection();
+          const pt = proj.containerPointFromCoords(
+            new window.kakao.maps.LatLng(riskInfoWindow.lat, riskInfoWindow.lng)
+          );
+          const levelClass = riskInfoWindow.riskLevel === 'VERY_HIGH' || riskInfoWindow.riskLevel === 'HIGH' ? 'high'
+            : riskInfoWindow.riskLevel === 'MEDIUM' ? 'medium' : 'low';
+          const levelLabel = riskInfoWindow.riskLevel === 'VERY_HIGH' || riskInfoWindow.riskLevel === 'HIGH' ? '위험'
+            : riskInfoWindow.riskLevel === 'MEDIUM' ? '주의' : '양호';
+          return (
+            <div
+              className="risk-info-window"
+              style={{ position: 'absolute', left: pt.x, top: pt.y, transform: 'translate(-50%, -200%)', zIndex: 300, pointerEvents: 'auto' }}
+            >
+              <div className="risk-info-header">
+                <span className="risk-info-name">{riskInfoWindow.name || '위험구간'}</span>
+                <button className="risk-info-close" onClick={() => setRiskInfoWindow(null)}>&times;</button>
+              </div>
+              <div className="risk-info-body">
+                <div className="risk-info-row"><span>경사도</span><strong>{riskInfoWindow.grade ? riskInfoWindow.grade.toFixed(1) + '%' : '정보없음'}</strong></div>
+                <div className="risk-info-row"><span>위험등급</span><span className={`risk-badge ${levelClass}`}>{levelLabel}</span></div>
+                <div className="risk-info-row"><span>경로 이격</span><strong>{riskInfoWindow.distanceFromRoute ? riskInfoWindow.distanceFromRoute.toFixed(1) + 'm' : '-'}</strong></div>
+              </div>
+            </div>
+          );
+        } catch (_) { return null; }
+      })()}
 
       {/* 내 위치 버튼 */}
       <button className="my-location-btn" onClick={handleMyLocation} title="내 위치">
@@ -655,16 +763,6 @@ function MapPage() {
           </button>
         </div>
 
-        {/* 검색바 */}
-        <div className="search-box">
-          <span className="search-icon">🔍</span>
-          <input
-            type="text"
-            placeholder="장소, 주소 검색"
-            className="search-input"
-          />
-        </div>
-
         {/* 탭 메뉴 */}
         <div className="tab-menu">
           {TABS.map((tab) => (
@@ -679,11 +777,17 @@ function MapPage() {
           ))}
         </div>
 
-        {/* 탭 콘텐츠 */}
+        {/* 탭 콘텐츠 — display로 전환 (unmount 방지, state 유지) */}
         <div className="tab-content">
-          {activeTab === 'route' && <RoutePanel kakaoReady={kakaoReady} onRouteFound={drawRoute} onDetourFound={drawDetourRoute} onSelectRoute={selectRoute} defaultOrigin={defaultOrigin} />}
-          {activeTab === 'uphill' && <UphillPanel onItemClick={moveToLocation} />}
-          {activeTab === 'safety' && <SafetyPanel onToggleLayer={showLayerMarkers} onClearLayer={clearLayerMarkers} />}
+          <div style={{ display: activeTab === 'route' ? '' : 'none' }}>
+            <RoutePanel kakaoReady={kakaoReady} onRouteFound={drawRoute} onDetourFound={drawDetourRoute} onSelectRoute={selectRoute} defaultOrigin={defaultOrigin} />
+          </div>
+          <div style={{ display: activeTab === 'uphill' ? '' : 'none' }}>
+            <UphillPanel onItemClick={moveToLocation} />
+          </div>
+          <div style={{ display: activeTab === 'safety' ? '' : 'none' }}>
+            <SafetyPanel onToggleLayer={showLayerMarkers} onClearLayer={clearLayerMarkers} />
+          </div>
         </div>
       </div>
     </div>
@@ -778,6 +882,13 @@ function PlaceSearchInput({ placeholder, value, onChange, onClear, onSelect, dot
   );
 }
 
+const toKorError = (err) => {
+  if (!err?.message || err.message === 'Failed to fetch' || err instanceof TypeError) {
+    return '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.';
+  }
+  return err.message;
+};
+
 function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, defaultOrigin }) {
   const [originText, setOriginText] = useState('');
   const [destText, setDestText] = useState('');
@@ -854,7 +965,7 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
         searchDetour(data);
       }
     } catch (err) {
-      setError(err.message || '경로 검색 중 오류가 발생했습니다.');
+      setError(toKorError(err));
     } finally {
       setLoading(false);
     }
@@ -900,7 +1011,7 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
       }
     } catch (err) {
       console.error('우회 경로 검색 실패:', err);
-      setDetourError(err.message || '우회 경로를 찾을 수 없습니다. 원래 경로를 이용해주세요.');
+      setDetourError(toKorError(err));
     } finally {
       setDetourLoading(false);
     }
@@ -937,7 +1048,7 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
       {error && <p className="route-error">{error}</p>}
 
       <button className="primary-btn" onClick={handleSearch} disabled={loading}>
-        {loading ? '검색 중...' : '경로 검색'}
+        {loading ? <span className="btn-loading"><span className="btn-spinner" />검색 중...</span> : '경로 검색'}
       </button>
 
       {routeInfo && (
@@ -1039,27 +1150,13 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
         </div>
       )}
 
-      <div className="option-group">
-        <p className="option-label">경로 옵션</p>
-        <div className="option-chips">
-          {ROUTE_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              className={`chip ${routeOption === opt.id ? 'active' : ''}`}
-              onClick={() => setRouteOption(opt.id)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
 
 const REGION_OPTIONS = [
   { label: '전체 지역', value: '' },
-  { label: '성남시', value: '41130' },
+  { label: '성남시', value: '411' },
   { label: '수정구', value: '41131' },
   { label: '중원구', value: '41133' },
   { label: '분당구', value: '41135' },
@@ -1082,7 +1179,7 @@ function UphillPanel({ onItemClick }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [regionCode, setRegionCode] = useState('');
+  const [regionCode, setRegionCode] = useState('411');
   const [riskLevel, setRiskLevel] = useState('');
 
   const fetchData = useCallback(async (region, risk) => {
@@ -1099,7 +1196,7 @@ function UphillPanel({ onItemClick }) {
       setItems(data);
     } catch (err) {
       console.error('급경사지 데이터 로드 실패:', err);
-      setError(err.message);
+      setError(toKorError(err));
       setItems(FALLBACK_DATA);
     } finally {
       setLoading(false);
@@ -1209,7 +1306,7 @@ function WeatherCard({ weather }) {
       </div>
       {weather.warning && (
         <div className="weather-warning">
-          <span className="warning-icon">\u26A0\uFE0F</span>
+          <span className="warning-icon">⚠️</span>
           <span>{weather.warning}</span>
         </div>
       )}
@@ -1222,11 +1319,11 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
   const [loading, setLoading] = useState(true);
   const [riskStats, setRiskStats] = useState({ high: 0, medium: 0, low: 0 });
   const [layers, setLayers] = useState({
-    lights: false, accidents: false, cctv: false,
+    accidents: false, cctv: false,
     protectedZones: false, welfare: false, shelters: false, senior: false,
   });
   const [layerData, setLayerData] = useState({
-    lights: [], accidents: [], cctv: [],
+    accidents: [], cctv: [],
     protectedZones: [], welfare: [], shelters: [], senior: [],
   });
 
@@ -1262,7 +1359,6 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
 
   // 레이어 설정
   const LAYER_CONFIG = [
-    { key: 'lights', label: '보안등', emoji: '\uD83D\uDCA1', endpoint: '/safety/security-lights' },
     { key: 'accidents', label: '사고다발지', emoji: '\u26A0\uFE0F', endpoint: '/safety/accident-zones' },
     { key: 'cctv', label: 'CCTV', emoji: '\uD83D\uDCF9', endpoint: '/safety/cctv' },
     { key: 'protectedZones', label: '교통약자 보호구역', emoji: '\uD83D\uDEB8', endpoint: '/safety/protected-zones' },
@@ -1306,6 +1402,19 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
     } catch (err) {
       console.error(`[${type}] 데이터 로드 실패:`, err);
     }
+  };
+
+  const handleAllOn = () => {
+    LAYER_CONFIG.forEach(({ key }) => {
+      if (!layers[key]) handleToggle(key);
+    });
+  };
+
+  const handleAllOff = () => {
+    LAYER_CONFIG.forEach(({ key }) => {
+      if (layers[key]) onClearLayer(key);
+    });
+    setLayers({ accidents: false, cctv: false, protectedZones: false, welfare: false, shelters: false, senior: false });
   };
 
   const getWeatherAlerts = () => {
@@ -1374,7 +1483,13 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
 
       {/* 지도 레이어 토글 */}
       <div className="layer-toggles">
-        <p className="option-label">지도 레이어</p>
+        <div className="layer-toggles-header">
+          <p className="option-label">지도 레이어</p>
+          <div className="layer-all-btns">
+            <button className="layer-all-btn" onClick={handleAllOn}>전체 켜기</button>
+            <button className="layer-all-btn off" onClick={handleAllOff}>전체 끄기</button>
+          </div>
+        </div>
         <div className="layer-toggle-list">
           {LAYER_CONFIG.map(({ key, label, emoji }) => (
             <button

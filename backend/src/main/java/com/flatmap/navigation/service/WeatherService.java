@@ -43,6 +43,7 @@ public class WeatherService {
         int[] grid = GridConverter.toGrid(lat, lng);
         int nx = grid[0];
         int ny = grid[1];
+        log.info("[날씨] 격자 변환: lat={}, lng={} → nx={}, ny={}", lat, lng, nx, ny);
         String cacheKey = nx + "," + ny;
 
         CacheEntry entry = cache.get(cacheKey);
@@ -85,9 +86,11 @@ public class WeatherService {
                 .build(false)
                 .toUriString();
 
-        log.debug("기상청 API 호출: base_date={}, base_time={}, nx={}, ny={}", baseDate, baseTime, nx, ny);
+        log.info("[날씨] 기상청 API 호출: base_date={}, base_time={}, nx={}, ny={}", baseDate, baseTime, nx, ny);
 
         String response = restTemplate.getForObject(url, String.class);
+        log.info("[날씨] 기상청 API 응답 (앞 500자): {}",
+                response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
         return parseResponse(response);
     }
 

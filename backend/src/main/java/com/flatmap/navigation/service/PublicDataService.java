@@ -14,7 +14,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -168,11 +170,11 @@ public class PublicDataService {
 
         // 공공데이터포털 "경기도 성남시교통약자 보호��역" API
         // TODO: 정확한 엔드포인트 URL은 공공데이터포털에서 확인 필요
-        String baseUrl = "https://apis.data.go.kr/6410000/transportvlnrblprotectzn/getTransportvlnrblprotectznList";
+        String baseUrl = "https://apis.data.go.kr/3780000/protectedAreaService/protectedAreaList";
         List<ProtectedZone> zones = new ArrayList<>();
 
         try {
-            String rawResponse = callPublicDataApiPaginated(baseUrl, 500);
+            String rawResponse = callPublicDataApiPaginated(baseUrl, 100);
             if (rawResponse != null) {
                 JsonNode items = extractItems(rawResponse, "교통약자보호구역");
                 if (items != null) {
@@ -204,18 +206,21 @@ public class PublicDataService {
     }
 
     private ProtectedZone parseProtectedZone(JsonNode item) {
-        String name = getFieldValue(item, "PROTECT_NM", "ZONE_NM", "NM", "nm",
+        String name = getFieldValue(item, "sisulnm", "PROTECT_NM", "ZONE_NM", "NM", "nm",
                 "protectzn_nm", "protect_nm", "zone_nm");
         if (name == null || name.isEmpty()) name = "교통약자 보호구역";
 
-        String type = getFieldValue(item, "PROTECT_SE", "ZONE_SE", "SE", "zone_type",
+        String type = getFieldValue(item, "idprt", "PROTECT_SE", "ZONE_SE", "SE", "zone_type",
                 "protectzn_se", "protect_se");
         String address = getAddress(item);
 
-        // 성남시 필터 (주소 기반)
-        boolean isSeongnam = address != null && address.contains("성남");
-        String regionCode = getFieldValue(item, "SIGUN_CD", "sigun_cd", "REGION_CD");
-        if (!isSeongnam && !isSeongnamRegion(regionCode)) return null;
+        // 성남시 필터: 주소 / signgunm(시군구명) / signgucd(코드) 중 하나로 확인
+        String signgunm = getFieldValue(item, "signgunm", "ctprvnnm");
+        String regionCode = getFieldValue(item, "signgucd", "SIGUN_CD", "sigun_cd", "REGION_CD");
+        boolean isSeongnam = (address != null && address.contains("성남"))
+                || (signgunm != null && signgunm.contains("성남"))
+                || isSeongnamRegion(regionCode);
+        if (!isSeongnam) return null;
 
         double[] coords = extractCoords(item, address);
         if (coords == null) return null;
@@ -232,11 +237,11 @@ public class PublicDataService {
         log.info("=== 경기도 성남시 장애인복지시설 데이터 수집 시작 ===");
 
         // "경기도 성남시장애인복지시설현황" API
-        String baseUrl = "https://apis.data.go.kr/6410000/dsbldwlfrfclt/getDsbldwlfrfcltList";
+        String baseUrl = "https://api.odcloud.kr/api/15043650/v1/uddi:93a25894-133a-4d83-9674-fcf34e1453e1";
         List<WelfareFacility> facilities = new ArrayList<>();
 
         try {
-            String rawResponse = callPublicDataApiPaginated(baseUrl, 500);
+            String rawResponse = callOdcloudApi(baseUrl, 1, 100);
             if (rawResponse != null) {
                 JsonNode items = extractItems(rawResponse, "장애인복지시설");
                 if (items != null) {
@@ -268,14 +273,15 @@ public class PublicDataService {
     }
 
     private WelfareFacility parseWelfareFacility(JsonNode item) {
-        String name = getFieldValue(item, "FACLT_NM", "BIZPLC_NM", "NM", "nm",
-                "fclt_nm", "faclt_nm", "bizplc_nm");
+        String name = getFieldValue(item, "시설명", "기관명",
+                "FACLT_NM", "BIZPLC_NM", "NM", "nm", "fclt_nm", "faclt_nm", "bizplc_nm");
         if (name == null || name.isEmpty()) name = "장애인복지시설";
 
-        String type = getFieldValue(item, "FACLT_SE", "BSNS_SE", "SE",
-                "fclt_se", "faclt_se", "bsns_se");
+        String type = getFieldValue(item, "시설종별", "시설구분",
+                "FACLT_SE", "BSNS_SE", "SE", "fclt_se", "faclt_se", "bsns_se");
         String address = getAddress(item);
-        String phone = getFieldValue(item, "TELNO", "TEL", "PHONE", "telno", "tel", "phone");
+        String phone = getFieldValue(item, "전화", "전화번호",
+                "TELNO", "TEL", "PHONE", "telno", "tel", "phone");
 
         boolean isSeongnam = address != null && address.contains("성남");
         String regionCode = getFieldValue(item, "SIGUN_CD", "sigun_cd", "REGION_CD");
@@ -296,11 +302,11 @@ public class PublicDataService {
         log.info("=== 경기도 성남시 그늘막 데이터 수집 시작 ===");
 
         // "경기도성남시그늘막현황" API
-        String baseUrl = "https://apis.data.go.kr/6410000/shdeshltr/getShdeshltrList";
+        String baseUrl = "https://api.odcloud.kr/api/15043080/v1/uddi:1cf75dce-dc86-4e98-bc08-b96ae29d5219";
         List<ShadeShelter> shelters = new ArrayList<>();
 
         try {
-            String rawResponse = callPublicDataApiPaginated(baseUrl, 500);
+            String rawResponse = callOdcloudApi(baseUrl, 1, 100);
             if (rawResponse != null) {
                 JsonNode items = extractItems(rawResponse, "그늘막");
                 if (items != null) {
@@ -332,16 +338,14 @@ public class PublicDataService {
     }
 
     private ShadeShelter parseShadeShelter(JsonNode item) {
-        String name = getFieldValue(item, "INSTL_LC", "FACLT_NM", "NM", "nm",
-                "instl_lc", "faclt_nm", "shde_nm");
+        String name = getFieldValue(item, "설치장소명", "관리번호", "구분",
+                "INSTL_LC", "FACLT_NM", "NM", "nm", "instl_lc", "faclt_nm", "shde_nm");
         if (name == null || name.isEmpty()) name = "그늘막";
 
         String address = getAddress(item);
-
-        boolean isSeongnam = address != null && address.contains("성남");
         String regionCode = getFieldValue(item, "SIGUN_CD", "sigun_cd", "REGION_CD");
-        if (!isSeongnam && !isSeongnamRegion(regionCode)) return null;
 
+        // 성남시 전용 데이터셋 — 주소/regionCode 없어도 좌표 범위로 최종 필터
         double[] coords = extractCoords(item, address);
         if (coords == null) return null;
         if (!isInSeongnamBounds(coords[0], coords[1])) return null;
@@ -412,64 +416,105 @@ public class PublicDataService {
     }
 
     // ============================================================
-    // 2-5. CCTV 위치 (실제 데이터로 교체)
+    // 2-5. CCTV 위치 (경기데이터드림 openapi.gg.go.kr/CCTV)
     // ============================================================
 
     public int fetchAndSaveCctvLocations() {
-        log.info("=== 경기도 성남시 CCTV 데이터 수집 시작 ===");
+        log.info("=== 경기도 성남시 CCTV 데이터 수집 시작 (경기데이터드림 CCTV) ===");
 
-        // "경기도 성남시CCTV 위치별 조도 휘도" API
-        String baseUrl = "https://apis.data.go.kr/6410000/cctvlcilmnnclmnnc/getCctvlcilmnnclmnncList";
         List<CctvLocation> cctvs = new ArrayList<>();
+        int page = 1;
 
-        try {
-            String rawResponse = callPublicDataApiPaginated(baseUrl, 1000);
-            if (rawResponse != null) {
-                JsonNode items = extractItems(rawResponse, "CCTV");
-                if (items != null) {
-                    for (JsonNode item : items) {
-                        try {
-                            CctvLocation c = parseCctvLocation(item);
-                            if (c != null) cctvs.add(c);
-                        } catch (Exception e) {
-                            log.warn("CCTV item 파싱 실패: {}", e.getMessage());
-                        }
-                    }
+        while (true) {
+            String url = String.format("https://openapi.gg.go.kr/CCTV?KEY=%s&Type=json&pIndex=%d&pSize=1000",
+                    apiKeyConfig.getGyeonggiApiKey(), page);
+            log.info("[CCTV] API 호출: {}", url.replace(apiKeyConfig.getGyeonggiApiKey(), "***"));
+
+            try {
+                org.springframework.http.client.SimpleClientHttpRequestFactory rf =
+                        new org.springframework.http.client.SimpleClientHttpRequestFactory();
+                rf.setConnectTimeout(8000);
+                rf.setReadTimeout(8000);
+                RestTemplate ggRt = new RestTemplate(rf);
+
+                String raw = ggRt.getForObject(url, String.class);
+                if (raw == null || raw.trim().startsWith("<")) break;
+
+                log.info("[CCTV] 응답 앞 400자: {}", raw.substring(0, Math.min(raw.length(), 400)));
+
+                JsonNode root = objectMapper.readTree(raw);
+                // 경기 API 구조: {"CCTV":[{head},{row:[...]}]}
+                JsonNode rows = findGgRows(root);
+                if (rows == null || rows.isEmpty()) break;
+
+                if (page == 1) log.info("[CCTV] 첫 row: {}", rows.get(0));
+
+                for (JsonNode row : rows) {
+                    CctvLocation c = parseCctvLocationGg(row);
+                    if (c != null) cctvs.add(c);
                 }
-            } else {
-                log.warn("CCTV API 응답 없음. TODO: 공공데이터포털에서 정확한 URL 확인 필요. 시도한 URL: {}", baseUrl);
+                log.info("[CCTV] page={} {}건 조회, 성남시 {}건 누적", page, rows.size(), cctvs.size());
+                if (rows.size() < 1000) break;
+                page++;
+            } catch (Exception e) {
+                log.error("[CCTV] API 호출 실패: {}", e.getMessage());
+                break;
             }
-        } catch (Exception e) {
-            log.error("CCTV API 호출 실패: {}. TODO: 엔드포인트 URL 재확인 필요", e.getMessage());
         }
 
         if (!cctvs.isEmpty()) {
             cctvLocationRepository.deleteAll();
             cctvLocationRepository.saveAll(cctvs);
-            log.info("CCTV {}건 저장 완료 (실제 데이터로 교체)", cctvs.size());
+            log.info("CCTV 성남시 {}건 저장 완료", cctvs.size());
         } else {
-            log.info("CCTV 수집 결과 없음 (API 엔드포인트 확인 필요)");
+            log.warn("CCTV 수집 결과 없음");
         }
 
         return cctvs.size();
     }
 
-    private CctvLocation parseCctvLocation(JsonNode item) {
-        String name = getFieldValue(item, "CCTV_NM", "INSTL_LC", "NM", "nm",
-                "cctv_nm", "instl_lc", "faclt_nm");
-        if (name == null || name.isEmpty()) name = "CCTV";
+    private CctvLocation parseCctvLocationGg(JsonNode row) {
+        // API에 SIGUN_CD 필드 없음 — 주소로 성남시 필터
+        String addr = getFieldValue(row, "REFINE_ROADNM_ADDR", "REFINE_LOTNO_ADDR");
+        String instNm = getFieldValue(row, "MANAGE_INST_NM");
+        boolean isSeongnam = (addr != null && addr.contains("성남시"))
+                || (instNm != null && instNm.contains("성남"));
+        if (!isSeongnam) return null;
 
-        String address = getAddress(item);
+        Double lat = getFieldDoubleLocal(row, "REFINE_WGS84_LAT", "LAT");
+        Double lng = getFieldDoubleLocal(row, "REFINE_WGS84_LOGT", "LOGT", "LNG");
+        if (lat == null || lng == null) return null;
 
-        boolean isSeongnam = address != null && address.contains("성남");
-        String regionCode = getFieldValue(item, "SIGUN_CD", "sigun_cd", "REGION_CD");
-        if (!isSeongnam && !isSeongnamRegion(regionCode)) return null;
+        String name = getFieldValue(row, "INSTL_PUPRS_DIV_NM", "CCTV_INSTL_PURPS_NM", "MANAGE_INST_NM");
+        if (name == null) name = "CCTV";
 
-        double[] coords = extractCoords(item, address);
-        if (coords == null) return null;
-        if (!isInSeongnamBounds(coords[0], coords[1])) return null;
+        return new CctvLocation(name, lat, lng, addr);
+    }
 
-        return new CctvLocation(name, coords[0], coords[1], address);
+    /** 경기 API JSON 구조에서 row 배열 추출 */
+    private JsonNode findGgRows(JsonNode root) {
+        var names = root.fieldNames();
+        while (names.hasNext()) {
+            JsonNode svc = root.path(names.next());
+            if (svc.isArray() && svc.size() > 1) {
+                JsonNode rows = svc.get(1).path("row");
+                if (rows.isArray() && !rows.isEmpty()) return rows;
+            }
+        }
+        return null;
+    }
+
+    private Double getFieldDoubleLocal(JsonNode row, String... fieldNames) {
+        for (String name : fieldNames) {
+            JsonNode node = row.path(name);
+            if (!node.isMissingNode() && !node.isNull()) {
+                String val = node.asText().trim();
+                if (!val.isEmpty()) {
+                    try { return Double.parseDouble(val); } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return null;
     }
 
     // ============================================================
@@ -526,6 +571,25 @@ public class PublicDataService {
         return callPublicDataApi(baseUrl, 1, pageSize);
     }
 
+    /**
+     * odcloud.kr API 호출. 파라미터 형식: page, perPage, serviceKey (numOfRows/pageNo 아님).
+     * 응답 구조: { "currentCount": N, "data": [...], ... }
+     */
+    private String callOdcloudApi(String baseUrl, int page, int perPage) {
+        String url = String.format("%s?page=%d&perPage=%d&serviceKey=%s",
+                baseUrl, page, perPage, publicDataApiKey);
+        log.info("[odcloud] API 호출: {}", url.replace(publicDataApiKey, "***"));
+        try {
+            String raw = restTemplate.getForObject(url, String.class);
+            log.info("[odcloud] 응답 앞 500자: {}",
+                    raw != null ? raw.substring(0, Math.min(raw.length(), 500)) : "null");
+            return (raw != null && !raw.trim().startsWith("<")) ? raw : null;
+        } catch (Exception e) {
+            log.error("[odcloud] API 호출 실패: {}", e.getMessage());
+            return null;
+        }
+    }
+
     // ============================================================
     // 공통 응답 파싱
     // ============================================================
@@ -552,8 +616,20 @@ public class PublicDataService {
                 return items;
             }
 
-            // 구조 3: body[]
+            // 구조 3: body[] (배열)
             items = root.path("body");
+            if (items.isArray() && !items.isEmpty()) {
+                logFirstItem(apiName, items);
+                return items;
+            }
+
+            // 구조 3b: body.items.item[] (response wrapper 없이 바로 header/body)
+            items = root.path("body").path("items").path("item");
+            if (items.isArray() && !items.isEmpty()) {
+                logFirstItem(apiName, items);
+                return items;
+            }
+            items = root.path("body").path("items");
             if (items.isArray() && !items.isEmpty()) {
                 logFirstItem(apiName, items);
                 return items;
@@ -603,7 +679,9 @@ public class PublicDataService {
                 "ROADNM_ADDR", "LOTNO_ADDR", "ADDR", "ADDRESS",
                 "refine_roadnm_addr", "refine_lotno_addr",
                 "roadnm_addr", "lotno_addr", "addr", "address",
-                "LC_NM", "lc_nm", "INSTL_LC", "instl_lc");
+                "LC_NM", "lc_nm", "INSTL_LC", "instl_lc",
+                "소재지도로명주소", "소재지번주소", "소재지", "설치주소", "주소",
+                "rdnmadr", "lnmadr");
     }
 
     /**
@@ -612,9 +690,11 @@ public class PublicDataService {
      */
     private double[] extractCoords(JsonNode item, String address) {
         Double latitude = getFieldDouble(item, "REFINE_WGS84_LAT", "LAT", "LATITUDE",
-                "WGS84_LAT", "Y", "refine_wgs84_lat", "lat", "latitude", "y");
+                "WGS84_LAT", "Y", "refine_wgs84_lat", "lat", "latitude", "y",
+                "위도", "위도(LATITUDE)");
         Double longitude = getFieldDouble(item, "REFINE_WGS84_LOGT", "LOT", "LNG", "LONGITUDE",
-                "WGS84_LOGT", "X", "refine_wgs84_logt", "lot", "lng", "longitude", "x");
+                "WGS84_LOGT", "X", "refine_wgs84_logt", "lot", "lng", "longitude", "x",
+                "경도", "경도(LONGITUDE)");
 
         if (latitude != null && longitude != null) return new double[]{latitude, longitude};
 
@@ -648,27 +728,72 @@ public class PublicDataService {
     }
 
     private double[] geocodeAddress(String address) {
+        // 1순위: 키워드 검색 (건물명·층·호수 포함된 주소도 처리 가능)
+        double[] result = tryKeywordSearch(address);
+        if (result != null) return result;
+
+        // 2순위: 콤마·괄호 제거 후 주소 검색
+        String cleaned = address.replaceAll(",\\s*.*$", "")
+                                .replaceAll("\\s*\\([^)]*\\)\\s*", " ")
+                                .trim();
+        return tryAddressSearch(cleaned);
+    }
+
+    private double[] tryKeywordSearch(String query) {
         try {
-            String encoded = URLEncoder.encode(address, StandardCharsets.UTF_8);
-            String url = "https://dapi.kakao.com/v2/local/search/address.json?query=" + encoded;
+            URI encodedUri = UriComponentsBuilder
+                    .fromHttpUrl("https://dapi.kakao.com/v2/local/search/keyword.json")
+                    .queryParam("query", query)
+                    .queryParam("size", 1)
+                    .encode()
+                    .build()
+                    .toUri();
 
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "KakaoAK " + apiKeyConfig.getKakaoRestApiKey());
 
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    encodedUri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JsonNode root = objectMapper.readTree(response.getBody());
-                JsonNode documents = root.path("documents");
-                if (documents.isArray() && !documents.isEmpty()) {
-                    double lat = documents.get(0).path("y").asDouble();
-                    double lng = documents.get(0).path("x").asDouble();
+                JsonNode docs = objectMapper.readTree(response.getBody()).path("documents");
+                if (docs.isArray() && !docs.isEmpty()) {
+                    double lat = docs.get(0).path("y").asDouble();
+                    double lng = docs.get(0).path("x").asDouble();
                     if (lat != 0 && lng != 0) return new double[]{lat, lng};
                 }
             }
         } catch (Exception e) {
-            log.debug("지오코딩 실패 ({}): {}", address, e.getMessage());
+            log.debug("키워드 지오코딩 실패 ({}): {}", query, e.getMessage());
+        }
+        return null;
+    }
+
+    private double[] tryAddressSearch(String address) {
+        try {
+            URI encodedUri = UriComponentsBuilder
+                    .fromHttpUrl("https://dapi.kakao.com/v2/local/search/address.json")
+                    .queryParam("query", address)
+                    .encode()
+                    .build()
+                    .toUri();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "KakaoAK " + apiKeyConfig.getKakaoRestApiKey());
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    encodedUri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                JsonNode docs = objectMapper.readTree(response.getBody()).path("documents");
+                if (docs.isArray() && !docs.isEmpty()) {
+                    double lat = docs.get(0).path("y").asDouble();
+                    double lng = docs.get(0).path("x").asDouble();
+                    if (lat != 0 && lng != 0) return new double[]{lat, lng};
+                }
+            }
+        } catch (Exception e) {
+            log.debug("주소 지오코딩 실패 ({}): {}", address, e.getMessage());
         }
         return null;
     }

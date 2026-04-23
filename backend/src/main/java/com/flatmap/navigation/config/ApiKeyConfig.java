@@ -33,6 +33,9 @@ public class ApiKeyConfig {
     @Value("${gyeonggi.senior-center.api-key}")
     private String gyeonggiSeniorCenterApiKey;
 
+    @Value("${gyeonggi.api-key}")
+    private String gyeonggiApiKey;
+
     @Value("${disaster.steep-slope.api-key}")
     private String disasterSteepSlopeApiKey;
 
@@ -63,6 +66,7 @@ public class ApiKeyConfig {
     public String getGyeonggiUphillLaneApiKey() { return gyeonggiUphillLaneApiKey; }
     public String getGyeonggiSeniorWelfareApiKey() { return gyeonggiSeniorWelfareApiKey; }
     public String getGyeonggiSeniorCenterApiKey() { return gyeonggiSeniorCenterApiKey; }
+    public String getGyeonggiApiKey() { return gyeonggiApiKey; }
     public String getDisasterSteepSlopeApiKey() { return disasterSteepSlopeApiKey; }
     public String getDisasterTrafficDownhillApiKey() { return disasterTrafficDownhillApiKey; }
     public String getDisasterSteepSlopeFinalApiKey() { return disasterSteepSlopeFinalApiKey; }

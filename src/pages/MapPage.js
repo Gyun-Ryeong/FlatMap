@@ -28,11 +28,6 @@ function MapPage() {
   const mapInstanceRef = useRef(null);
   const polylinesRef = useRef([]);
   const markersRef = useRef([]);
-  const riskSectionsRef = useRef([]);         // 원래 경로 riskSections 데이터
-  const detourRiskSectionsRef = useRef([]);   // 우회 경로 riskSections 데이터
-  const [visibleRiskMarkers, setVisibleRiskMarkers] = useState([]); // "!" 마커 React state
-  const [mapTick, setMapTick] = useState(0);   // 지도 이동/줌 시 re-render 트리거
-  const [riskInfoWindow, setRiskInfoWindow] = useState(null); // 클릭한 "!" 마커 InfoWindow
   const myLocationOverlayRef = useRef(null);
   const myLocationRef = useRef(null);
   const [activeTab, setActiveTab] = useState('route');
@@ -244,13 +239,9 @@ function MapPage() {
       setKakaoReady(true);
       console.log('카카오맵 초기화 완료');
 
-      // 줌 변경 / 드래그 시 레이어 마커 + React "!" 마커 위치 갱신
+      // 줌 변경 시 레이어 마커 밀도 갱신
       kakao.maps.event.addListener(mapInstanceRef.current, 'zoom_changed', () => {
         updateLayerMarkersForZoom();
-        setMapTick((t) => t + 1);
-      });
-      kakao.maps.event.addListener(mapInstanceRef.current, 'dragend', () => {
-        setMapTick((t) => t + 1);
       });
 
       // 현재 위치 가져오기
@@ -361,33 +352,16 @@ function MapPage() {
     detourPolylinesRef.current = [];
     detourMarkersRef.current.forEach((m) => m.setMap(null));
     detourMarkersRef.current = [];
-    detourRiskSectionsRef.current = [];
   }, []);
+
 
   const clearRoute = useCallback(() => {
     polylinesRef.current.forEach((p) => p.setMap(null));
     polylinesRef.current = [];
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
-    riskSectionsRef.current = [];
-    setVisibleRiskMarkers([]);
-    setRiskInfoWindow(null);
     clearDetour();
   }, [clearDetour]);
-
-  // "!" 마커를 React state로 설정 (CustomOverlay 불사용)
-  const createRiskMarkers = useCallback((sections, prefix) => {
-    console.log('[createRiskMarkers] sections:', sections?.length, 'prefix:', prefix);
-    setVisibleRiskMarkers(sections.map((rs) => ({
-      lat: rs.lat,
-      lng: rs.lng,
-      riskLevel: rs.riskLevel,
-      name: rs.name,
-      grade: rs.grade,
-      distanceFromRoute: rs.distanceFromRoute,
-    })));
-    setRiskInfoWindow(null);
-  }, []);
 
   const drawRoute = useCallback((coords, riskSections = []) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -507,12 +481,8 @@ function MapPage() {
     path.forEach((p) => bounds.extend(p));
     mapInstanceRef.current.setBounds(bounds);
 
-    // drawRoute 완료 후 "!" 마커 즉시 생성
-    riskSectionsRef.current = riskSections;
-    createRiskMarkers(riskSections, 'risk-overlay');
-
     console.log('경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
-  }, [clearRoute, createRiskMarkers]);
+  }, [clearRoute]);
 
   const setRouteOpacity = useCallback((opacity) => {
     polylinesRef.current.forEach((p) => p.setOptions({ strokeOpacity: opacity }));
@@ -603,11 +573,6 @@ function MapPage() {
       mapInstanceRef.current.setBounds(bounds);
     }
 
-    // 우회 경로 riskSections 저장, drawRoute에서 표시한 "!" 마커 초기화
-    detourRiskSectionsRef.current = riskSections;
-    setVisibleRiskMarkers([]);  // 원래 경로 마커 제거 (selectRoute에서 재생성)
-    setRiskInfoWindow(null);
-
     console.log('우회 경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
   }, [clearDetour, setRouteOpacity]);
 
@@ -615,33 +580,18 @@ function MapPage() {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // InfoWindow 닫기
-    setRiskInfoWindow(null);
-
     if (type === 'original') {
-      console.log('[selectRoute] original - riskSectionsRef:', riskSectionsRef.current?.length);
-      // 원래 경로 폴리라인 + 출발/도착 마커 표시
       polylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.8 }); });
       markersRef.current.forEach((m) => m.setMap(map));
-      // 우회 경로 숨김
       detourPolylinesRef.current.forEach((p) => p.setMap(null));
       detourMarkersRef.current.forEach((m) => m.setMap(null));
-      // 원래 경로 "!" 마커 새로 생성
-      console.log('[selectRoute] original - setVisibleRiskMarkers 호출');
-      createRiskMarkers(riskSectionsRef.current, 'risk-overlay');
     } else {
-      console.log('[selectRoute] detour - detourRiskSectionsRef:', detourRiskSectionsRef.current?.length);
-      // 원래 경로 폴리라인 숨김
       polylinesRef.current.forEach((p) => p.setMap(null));
-      // 우회 경로 폴리라인 + 출발/도착 마커 표시
       detourPolylinesRef.current.forEach((p) => { p.setMap(map); p.setOptions({ strokeOpacity: 0.9 }); });
       detourMarkersRef.current.forEach((m) => m.setMap(map));
       markersRef.current.forEach((m) => m.setMap(map));
-      // 우회 경로 "!" 마커 새로 생성
-      console.log('[selectRoute] detour - setVisibleRiskMarkers 호출');
-      createRiskMarkers(detourRiskSectionsRef.current, 'detour-overlay');
     }
-  }, [createRiskMarkers]);
+  }, []);
 
   const moveToLocation = useCallback((lat, lng, name) => {
     if (!mapInstanceRef.current || !window.kakao?.maps) return;
@@ -679,59 +629,6 @@ function MapPage() {
     <div className="map-layout">
       <div ref={mapRef} className="map-container" />
 
-      {/* React state로 관리하는 "!" 위험 마커 — map-layout 기준 absolute */}
-      {mapInstanceRef.current && window.kakao?.maps && visibleRiskMarkers.map((marker) => {
-        try {
-          const proj = mapInstanceRef.current.getProjection();
-          const pt = proj.containerPointFromCoords(
-            new window.kakao.maps.LatLng(marker.lat, marker.lng)
-          );
-          const key = `${marker.lat}-${marker.lng}`;
-          const levelClass = marker.riskLevel === 'VERY_HIGH' || marker.riskLevel === 'HIGH' ? 'high'
-            : marker.riskLevel === 'MEDIUM' ? 'medium' : 'low';
-          console.log('DOM risk markers:', document.querySelectorAll('.risk-overlay-marker').length, 'state:', visibleRiskMarkers.length);
-          return (
-            <div
-              key={key}
-              className="risk-overlay-marker"
-              style={{ position: 'absolute', left: pt.x, top: pt.y, transform: 'translate(-50%, -130%)', zIndex: 200, cursor: 'pointer', pointerEvents: 'auto' }}
-              onClick={(e) => { e.stopPropagation(); setRiskInfoWindow(riskInfoWindow?.key === key ? null : { ...marker, key }); }}
-            >
-              <div className={`risk-overlay-icon ${levelClass}`}>!</div>
-            </div>
-          );
-        } catch (_) { return null; }
-      })}
-
-      {/* 클릭한 "!" 마커 InfoWindow */}
-      {riskInfoWindow && mapInstanceRef.current && window.kakao?.maps && (() => {
-        try {
-          const proj = mapInstanceRef.current.getProjection();
-          const pt = proj.containerPointFromCoords(
-            new window.kakao.maps.LatLng(riskInfoWindow.lat, riskInfoWindow.lng)
-          );
-          const levelClass = riskInfoWindow.riskLevel === 'VERY_HIGH' || riskInfoWindow.riskLevel === 'HIGH' ? 'high'
-            : riskInfoWindow.riskLevel === 'MEDIUM' ? 'medium' : 'low';
-          const levelLabel = riskInfoWindow.riskLevel === 'VERY_HIGH' || riskInfoWindow.riskLevel === 'HIGH' ? '위험'
-            : riskInfoWindow.riskLevel === 'MEDIUM' ? '주의' : '양호';
-          return (
-            <div
-              className="risk-info-window"
-              style={{ position: 'absolute', left: pt.x, top: pt.y, transform: 'translate(-50%, -200%)', zIndex: 300, pointerEvents: 'auto' }}
-            >
-              <div className="risk-info-header">
-                <span className="risk-info-name">{riskInfoWindow.name || '위험구간'}</span>
-                <button className="risk-info-close" onClick={() => setRiskInfoWindow(null)}>&times;</button>
-              </div>
-              <div className="risk-info-body">
-                <div className="risk-info-row"><span>경사도</span><strong>{riskInfoWindow.grade ? riskInfoWindow.grade.toFixed(1) + '%' : '정보없음'}</strong></div>
-                <div className="risk-info-row"><span>위험등급</span><span className={`risk-badge ${levelClass}`}>{levelLabel}</span></div>
-                <div className="risk-info-row"><span>경로 이격</span><strong>{riskInfoWindow.distanceFromRoute ? riskInfoWindow.distanceFromRoute.toFixed(1) + 'm' : '-'}</strong></div>
-              </div>
-            </div>
-          );
-        } catch (_) { return null; }
-      })()}
 
       {/* 내 위치 버튼 */}
       <button className="my-location-btn" onClick={handleMyLocation} title="내 위치">

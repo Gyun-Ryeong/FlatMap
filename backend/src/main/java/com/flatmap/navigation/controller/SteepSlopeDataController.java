@@ -248,6 +248,21 @@ public class SteepSlopeDataController {
         ));
     }
 
+    /** MOIS_CSV 급경사지 grade를 CSV 산여부 기준으로 업데이트 */
+    @PostMapping("/update-grade/csv")
+    public ResponseEntity<Map<String, Object>> updateGradeFromCsv() {
+        log.info("MOIS_CSV grade 업데이트 요청");
+        try {
+            Map<String, Integer> result = csvImportService.updateGradeFromCsv();
+            Map<String, Object> response = new java.util.HashMap<>(result);
+            response.put("message", "grade 업데이트 완료 (자연사면 67.5%, 인공사면 100.0%)");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("grade 업데이트 실패: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** 행정안전부 CSV 성남시 급경사지 임포트 */
     @PostMapping("/import/csv")
     public ResponseEntity<Map<String, Object>> importFromCsv() {

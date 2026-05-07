@@ -26,6 +26,9 @@ yarn-error.log*
 .vscode/
 *.iml
 
+# Claude Code local settings
+.claude/
+
 # Backend
 backend/src/main/resources/application.properties
 /backend/target/

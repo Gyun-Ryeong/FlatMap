@@ -1018,7 +1018,7 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
                         <div key={i} className="risk-section-item">
                           <div className="risk-section-info">
                             <span className="risk-section-name">{rs.name || `위험구간 ${i + 1}`}</span>
-                            <span className="risk-section-detail">경사 {rs.grade ? rs.grade.toFixed(1) + '%' : '-'} · 경로에서 {rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(0) + 'm' : '-'}</span>
+                            <span className="risk-section-detail">경사 {rs.grade ? rs.grade.toFixed(1) + '°' : '-'} · 경로에서 {rs.distanceFromRoute ? rs.distanceFromRoute.toFixed(0) + 'm' : '-'}</span>
                           </div>
                           <span className={`risk-badge ${levelClass}`}>{levelLabel}</span>
                         </div>
@@ -1146,7 +1146,7 @@ function UphillPanel({ onItemClick }) {
               <span className="segment-city">{item.source || ''} {item.regionCode ? `(${item.regionCode})` : ''}</span>
             </div>
             <div className="segment-meta">
-              <span className="grade-badge">경사 {item.grade != null ? item.grade.toFixed(1) + '%' : '-'}</span>
+              <span className="grade-badge">경사 {item.grade != null ? item.grade.toFixed(1) + '°' : '-'}</span>
               <span className={`risk-badge ${getRiskClass(item.riskLevel)}`}>
                 {getRiskLabel(item.riskLevel)}
               </span>

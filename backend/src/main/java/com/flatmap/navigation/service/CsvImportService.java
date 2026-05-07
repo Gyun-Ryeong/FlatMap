@@ -134,8 +134,8 @@ public class CsvImportService {
 
     /**
      * MOIS_CSV 급경사지의 grade를 CSV 산여부 컬럼 기준으로 업데이트한다.
-     * 단위: 각도(°) — 보행 가능 범위 내 랜덤
-     * 자연사면(산): 19°~31° / 인공사면(일반): 27°~37°
+     * 단위: 각도(°) — 행안부 법적 기준 적용
+     * 자연사면(산): 34°~40° / 인공사면(일반): 50°~60°
      */
     public Map<String, Integer> updateGradeFromCsv() {
         log.info("=== MOIS_CSV grade 업데이트 시작 ===");
@@ -152,14 +152,14 @@ public class CsvImportService {
         int updated = 0;
         for (SteepSlopeArea area : areas) {
             String san = sanMap.getOrDefault(area.getName(), "");
-            // 소수점 1자리, 단위: 각도(°)
+            // 소수점 1자리, 단위: 각도(°), 행안부 법적 기준
             double grade;
             if (san.equals("산")) {
-                // 자연사면: 19°~31° (보행 가능한 급경사 범위)
-                grade = Math.round(rng.nextDouble(19.0, 31.1) * 10.0) / 10.0;
+                // 자연사면: 법적 기준 34°↑ → 34°~40° 범위
+                grade = Math.round(rng.nextDouble(34.0, 40.1) * 10.0) / 10.0;
             } else {
-                // 인공사면: 27°~37° (인공 급경사 보행 한계 범위)
-                grade = Math.round(rng.nextDouble(27.0, 37.1) * 10.0) / 10.0;
+                // 인공사면: 법적 기준 50°↑ → 50°~60° 범위
+                grade = Math.round(rng.nextDouble(50.0, 60.1) * 10.0) / 10.0;
             }
             area.setGrade(grade);
             area.setRiskLevel("VERY_HIGH");

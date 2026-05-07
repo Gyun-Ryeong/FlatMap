@@ -164,12 +164,20 @@ public class SteepSlopeDataController {
 
         List<SteepSlopeArea> result;
 
-        if (regionCode != null && !regionCode.isEmpty() && riskLevel != null && !riskLevel.isEmpty()) {
-            result = repository.findByRegionCodeStartingWithAndRiskLevel(regionCode, riskLevel.toUpperCase());
+        // HIGH 필터 요청 시 VERY_HIGH도 포함
+        List<String> riskLevels = null;
+        if (riskLevel != null && !riskLevel.isEmpty()) {
+            riskLevels = riskLevel.toUpperCase().equals("HIGH")
+                    ? java.util.List.of("HIGH", "VERY_HIGH")
+                    : java.util.List.of(riskLevel.toUpperCase());
+        }
+
+        if (regionCode != null && !regionCode.isEmpty() && riskLevels != null) {
+            result = repository.findByRegionCodeStartingWithAndRiskLevelIn(regionCode, riskLevels);
         } else if (regionCode != null && !regionCode.isEmpty()) {
             result = repository.findByRegionCodeStartingWith(regionCode);
-        } else if (riskLevel != null && !riskLevel.isEmpty()) {
-            result = repository.findByRiskLevel(riskLevel.toUpperCase());
+        } else if (riskLevels != null) {
+            result = repository.findByRiskLevelIn(riskLevels);
         } else {
             result = repository.findAll();
         }

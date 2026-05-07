@@ -1111,8 +1111,7 @@ function UphillPanel({ onItemClick }) {
   };
 
   const getRiskLabel = (level) => {
-    if (level === 'VERY_HIGH') return '매우위험';
-    if (level === 'HIGH') return '위험';
+    if (level === 'VERY_HIGH' || level === 'HIGH') return '위험';
     if (level === 'MEDIUM') return '주의';
     return '양호';
   };

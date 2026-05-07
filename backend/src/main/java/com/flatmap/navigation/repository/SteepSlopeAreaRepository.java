@@ -15,11 +15,15 @@ public interface SteepSlopeAreaRepository extends JpaRepository<SteepSlopeArea, 
 
     List<SteepSlopeArea> findByRiskLevel(String riskLevel);
 
+    List<SteepSlopeArea> findByRiskLevelIn(List<String> riskLevels);
+
     List<SteepSlopeArea> findByRegionCodeAndRiskLevel(String regionCode, String riskLevel);
 
     List<SteepSlopeArea> findByRegionCodeStartingWith(String regionCodePrefix);
 
     List<SteepSlopeArea> findByRegionCodeStartingWithAndRiskLevel(String regionCodePrefix, String riskLevel);
+
+    List<SteepSlopeArea> findByRegionCodeStartingWithAndRiskLevelIn(String regionCodePrefix, List<String> riskLevels);
 
     long countBySource(String source);
 

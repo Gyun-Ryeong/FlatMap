@@ -94,7 +94,6 @@ function MapPage() {
     const kakao = window.kakao;
     clearLayerMarkers(type);
 
-    console.log(`[${type}] API 응답 건수:`, items.length);
     activeLayersRef.current[type] = true;
 
     // CCTV — MarkerClusterer 적용
@@ -156,7 +155,6 @@ function MapPage() {
       clusterer.addMarkers(kakaoMarkers);
       cctvClustererRef.current = clusterer;
       layerMarkersRef.current[type] = kakaoMarkers;
-      console.log(`[cctv] MarkerClusterer 적용: ${kakaoMarkers.length}건`);
       return;
     }
 
@@ -218,7 +216,6 @@ function MapPage() {
       return overlay;
     }).filter(Boolean);
 
-    console.log(`[${type}] 마커 생성: ${newMarkers.length}건, 줌 제한: ${maxMarkers === Infinity ? '없음' : maxMarkers}`);
 
     newMarkers.forEach((m, i) => {
       if (i < maxMarkers) m.setMap(mapInstanceRef.current);
@@ -237,7 +234,6 @@ function MapPage() {
         level: 5,
       });
       setKakaoReady(true);
-      console.log('카카오맵 초기화 완료');
 
       // 줌 변경 시 레이어 마커 밀도 갱신
       kakao.maps.event.addListener(mapInstanceRef.current, 'zoom_changed', () => {
@@ -272,10 +268,8 @@ function MapPage() {
         const addr = result[0].road_address
           ? result[0].road_address.address_name
           : result[0].address.address_name;
-        console.log('현재 위치 주소:', addr);
         setDefaultOrigin({ name: addr, lat, lng });
       } else {
-        console.log('역지오코딩 실패, 좌표만 사용');
         setDefaultOrigin({ name: '현재 위치', lat, lng });
       }
     });
@@ -290,7 +284,6 @@ function MapPage() {
 
   const requestCurrentLocation = useCallback((kakao) => {
     if (!navigator.geolocation) {
-      console.log('Geolocation 미지원');
       setLocationMsg('브라우저가 위치 서비스를 지원하지 않습니다.');
       setTimeout(() => setLocationMsg(''), 3000);
       fetchMapWeather(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
@@ -300,7 +293,6 @@ function MapPage() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
-        console.log('현재 위치:', lat, lng);
         myLocationRef.current = { lat, lng };
 
         mapInstanceRef.current.setCenter(new kakao.maps.LatLng(lat, lng));
@@ -332,7 +324,6 @@ function MapPage() {
         mapInstanceRef.current.setCenter(new kakao.maps.LatLng(lat, lng));
         mapInstanceRef.current.setLevel(4);
         showMyLocationMarker(kakao, lat, lng);
-        console.log('내 위치로 이동:', lat, lng);
       },
       () => {
         if (myLocationRef.current) {
@@ -481,7 +472,6 @@ function MapPage() {
     path.forEach((p) => bounds.extend(p));
     mapInstanceRef.current.setBounds(bounds);
 
-    console.log('경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
   }, [clearRoute]);
 
   const setRouteOpacity = useCallback((opacity) => {
@@ -573,7 +563,6 @@ function MapPage() {
       mapInstanceRef.current.setBounds(bounds);
     }
 
-    console.log('우회 경로 표시 완료:', coords.length, '개 좌표,', riskSections.length, '개 위험구간');
   }, [clearDetour, setRouteOpacity]);
 
   const selectRoute = useCallback((type) => {
@@ -709,11 +698,9 @@ function PlaceSearchInput({ placeholder, value, onChange, onClear, onSelect, dot
       if (status === window.kakao.maps.services.Status.OK) {
         setResults(data.slice(0, 5));
         setShowResults(true);
-        console.log('장소 검색 결과:', keyword, data.length, '건');
       } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
         setResults([]);
         setShowResults(true);
-        console.log('장소 검색 결과 없음:', keyword);
       } else {
         console.error('장소 검색 실패:', status);
         setResults([]);
@@ -744,7 +731,6 @@ function PlaceSearchInput({ placeholder, value, onChange, onClear, onSelect, dot
     });
     onChange(place.place_name);
     setShowResults(false);
-    console.log('장소 선택:', place.place_name, place.x, place.y);
   };
 
   return (
@@ -807,7 +793,6 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
       defaultAppliedRef.current = true;
       setOriginText(defaultOrigin.name);
       setOriginPlace({ name: defaultOrigin.name, lat: defaultOrigin.lat, lng: defaultOrigin.lng });
-      console.log('출발지 기본값 설정:', defaultOrigin.name);
     }
   }, [defaultOrigin, originPlace]);
 
@@ -851,7 +836,6 @@ function RoutePanel({ kakaoReady, onRouteFound, onDetourFound, onSelectRoute, de
         weather: data.weather || null,
       });
 
-      console.log('위험구간 데이터:', data.riskSections);
 
       if (data.coords && data.coords.length > 0) {
         onRouteFound(data.coords, data.riskSections || []);
@@ -1285,11 +1269,9 @@ function SafetyPanel({ onToggleLayer, onClearLayer }) {
     if (!config) return;
 
     try {
-      console.log(`[${type}] API 호출: ${API_BASE}${config.endpoint}`);
       const res = await fetch(`${API_BASE}${config.endpoint}`);
       if (res.ok) {
         const data = await res.json();
-        console.log(`[${type}] API 응답:`, data.length, '건', data.slice(0, 2));
         setLayerData((prev) => ({ ...prev, [type]: data }));
         onToggleLayer(type, data, config.emoji);
       } else {

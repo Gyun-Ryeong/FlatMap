@@ -71,21 +71,14 @@ public class TMapRouteService {
 
         log.info("T Map 보행자 경로 요청: origin=({},{}), dest=({},{}), option={}, searchOption={}",
                 originLat, originLng, destLat, destLng, option, searchOption);
-        log.info("[DEBUG] 요청 URL: {}", TMAP_PEDESTRIAN_URL);
-        log.info("[DEBUG] 요청 body: {}", body);
-        log.info("[DEBUG] 요청 headers: appKey={}", apiKeyConfig.getTmapAppKey().substring(0, 8) + "...");
-
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
         try {
             org.springframework.http.ResponseEntity<String> responseEntity =
                     restTemplate.exchange(TMAP_PEDESTRIAN_URL, org.springframework.http.HttpMethod.POST, entity, String.class);
-            log.info("[DEBUG] 응답 status: {}", responseEntity.getStatusCode());
-            log.info("[DEBUG] 응답 body: {}", responseEntity.getBody());
             return parsePedestrianResponse(responseEntity.getBody());
         } catch (org.springframework.web.client.HttpClientErrorException e) {
-            log.error("[DEBUG] HTTP 에러 status: {}", e.getStatusCode());
-            log.error("[DEBUG] HTTP 에러 body: {}", e.getResponseBodyAsString());
+            log.error("T Map HTTP 에러: {} {}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("경로 검색에 실패했습니다.", e);
         } catch (RestClientException e) {
             log.error("T Map 보행자 경로 API 호출 실패: {}", e.getMessage());
